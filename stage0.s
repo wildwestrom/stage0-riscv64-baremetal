@@ -1,6 +1,9 @@
     .global _start
     .section .text.bios
 
+# Literally all this does is echo characters back through the serial port.
+# I add a newline after each character as it's easier to verify it's working.
+
 _start:	
     # UART base address
     li a1, 0x10000000
