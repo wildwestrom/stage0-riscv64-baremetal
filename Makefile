@@ -2,8 +2,8 @@ AS := riscv64-none-elf-as
 CC := riscv64-none-elf-gcc
 OBJCOPY := riscv64-none-elf-objcopy
 
-ASFLAGS := -march=rv64i -mabi=lp64
-LDFLAGS := -T baremetal.ld -march=rv64i -mabi=lp64 -nostdlib -static
+ASFLAGS := -march=rv64i_zifencei -mabi=lp64
+LDFLAGS := -T baremetal.ld -march=rv64i_zifencei -mabi=lp64 -nostdlib -static
 
 QEMU_TIMEOUT := 1s
 

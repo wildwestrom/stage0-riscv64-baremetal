@@ -18,16 +18,15 @@
     .section .text
 
 # UART base address
-.equ UART_BASE, 0x10000000
-.equ UART_LSR,  0x10000005
-.equ CODE_BASE, 0x10000
+    .equ UART_BASE, 0x10000000
+    .equ UART_LSR,  0x10000005
 
 _start:
-    # Set up stack (grow downward from a safe location)
-    li sp, 0x80000
+    # Set up stack (grow downward from a safe location in RAM)
+    la sp, stack_top
     
     # Set up memory pointer for storing hex bytes
-    li s2, CODE_BASE  # bp -> s2: pointer to where we store bytes
+    la s2, code_buffer  # bp -> s2: pointer to where we store bytes
     
     # Initialize toggle (di -> s1)
     li s1, 1          # toggle: 1 = first nibble, 0 = second nibble
@@ -122,20 +121,28 @@ poll_rx:
 
 clear_screen:
     # Routine: clears the display (for serial console, just print newlines)
+    addi sp, sp, -16
+    sd ra, 0(sp)
     li t0, 24          # Number of lines to clear
 clear_loop:
     li a0, 10          # Newline character
     call print_char
     addi t0, t0, -1
     bne t0, zero, clear_loop
+    ld ra, 0(sp)
+    addi sp, sp, 16
     ret
 
 display_newline:
     # Routine: print a newline
+    addi sp, sp, -16
+    sd ra, 0(sp)
     li a0, 13          # Carriage return
     call print_char
     li a0, 10          # Line feed
     call print_char
+    ld ra, 0(sp)
+    addi sp, sp, 16
     ret
 
 hex:
@@ -191,14 +198,19 @@ ascii_other:
     ret
 
 ascii_comment:
+    addi sp, sp, -16
+    sd ra, 0(sp)
     call read_char
     call print_char
     li t0, 13
     bne a0, t0, ascii_comment
     call display_newline
+    ld ra, 0(sp)
+    addi sp, sp, 16
     j ascii_other
 
 execute_code:
+    call display_newline
     # Zero all registers before jump (except sp and code location)
     li a0, 0
     li a1, 0
@@ -229,15 +241,30 @@ execute_code:
     li s11, 0
     
     # Jump to the code that we input by hand
-    li t0, CODE_BASE
+    la t0, code_buffer
+    fence.i
     jr t0
 
 insert_spacer:
+    addi sp, sp, -16
+    sd ra, 0(sp)
     li a0, 32          # Space character
     call print_char
+    ld ra, 0(sp)
+    addi sp, sp, 16
     ret
 
 done:
     # Halt (infinite loop)
     j done
+
+    .section .data
+    .balign 4
+code_buffer:
+    .space 0x1000
+
+    .balign 16
+stack_bottom:
+    .space 0x1000
+stack_top:
 
