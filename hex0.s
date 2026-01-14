@@ -39,16 +39,25 @@ loop:
     
     # Check for C-d (Ctrl-D = 4)
     li t0, 4
-    beq a0, t0, execute_code_label
-    
+    bne a0, t0, check_clear_screen
+    call execute_code
+    j loop
+
+check_clear_screen:
     # Check for C-l (Ctrl-L = 12)
     li t0, 12
-    beq a0, t0, clear_screen_label
-    
+    bne a0, t0, check_enter_key
+    call clear_screen
+    j loop
+
+check_enter_key:
     # Check for [Enter] (13)
     li t0, 13
-    beq a0, t0, display_newline_label
+    bne a0, t0, process_input
+    call display_newline
+    j loop
     
+process_input:
     # Otherwise just print the char
     call print_char    # Show the user what they input
     call hex           # Convert to what we want (result in a0)
@@ -60,15 +69,13 @@ loop:
     beq s1, zero, process_second_nibble
     
     # Process first byte of pair
-    li t0, 0x0F        # Mask out top
-    and s0, a0, t0     # Store first nibble in s0
+    andi s0, a0, 0x0F  # Store first nibble in s0
     li s1, 0           # Flip the toggle
     j loop
 
 process_second_nibble:
     slli s0, s0, 4     # Shift our first nibble left by 4
-    li t0, 0x0F        # Mask out top
-    and a0, a0, t0     # Mask second nibble
+    andi a0, a0, 0x0F  # Mask second nibble
     add a0, s0, a0     # Combine nibbles
     li s1, 1           # Flip the toggle
     
@@ -76,19 +83,6 @@ process_second_nibble:
     sb a0, 0(s2)       # Write our byte out
     addi s2, s2, 1     # Increment our pointer by 1
     
-    call insert_spacer
-    j loop
-
-execute_code_label:
-    call execute_code
-    j loop
-
-clear_screen_label:
-    call clear_screen
-    j loop
-
-display_newline_label:
-    call display_newline
     j loop
 
 print_char:
@@ -244,15 +238,6 @@ execute_code:
     la t0, code_buffer
     fence.i
     jr t0
-
-insert_spacer:
-    addi sp, sp, -16
-    sd ra, 0(sp)
-    li a0, 32          # Space character
-    call print_char
-    ld ra, 0(sp)
-    addi sp, sp, 16
-    ret
 
 done:
     # Halt (infinite loop)
