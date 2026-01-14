@@ -1,0 +1,201 @@
+## Copyright (C) 2016 Jeremiah Orians
+## This file is part of stage0.
+##
+## stage0 is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## stage0 is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with stage0.  If not, see <http://www.gnu.org/licenses/>.
+
+* Step 0 Setup the world
+First to get a vm that can run our code:
+make development
+
+For those of you who don't want to depend upon make, simply run:
+gcc -ggdb -DVM32=true -Dtty_lib=true vm.c vm_globals.c vm_instructions.c vm_decode.c tty.c functions/require.c functions/file_print.c functions/match.c -o bin/vm
+
+However if you are trying to hand convert the source code to your TTL Logic
+or relay based computer to ensure complete immunity from the trusting trust attack,
+please instead implement the equivalent of:
+gcc vm.h vm_minimal.c vm_instructions.c vm_decode.c -o bin/vm
+
+And we probably want a safe place to put the programs we make:
+mkdir roms
+
+* Step 1 create original bootstrap binary
+There are numerous methods but for simplicity, lets first get a basic hex assembler:
+
+gcc Linux\ Bootstrap/Legacy_pieces/hex.c -o bin/hex
+
+Then we can use it to make our bootstrap binary:
+./bin/hex < stage0/stage0_monitor.hex0 > roms/stage0_monitor
+
+Which should have the sha256sum of a551568d72804a2de6f6f94fcb507452e9d672c7638beb170dde84a9bf7fb82a
+
+* Step 2 create a hex assembler
+Now that we have a Hex monitor, we are now capable of either creating a text file (no ability to correct mistakes along the way) or any arbitrary hex program we want.
+
+I don't know about you but I don't want to manually type in every hex program forever, so I am going to use the capability of the Hex monitor to write text files full of commented Hex code.
+
+But to usefully build those code files, we need a hex assembler and here is how we make one.
+
+There are two methods,
+
+1) Cheat and simply ./bin/hex < stage1/stage1_assembler-0.hex0 > roms/stage1_assembler-0
+
+or
+
+2) manually type in the contents of stage1/stage1_assembler-0.hex0 while running:
+
+./bin/vm --rom roms/stage0_monitor --tape_01 roms/stage1_assembler-0 --tape_02 /dev/null
+
+
+If you fail to specify --tape_01 and/or --tape_02, this will produce tape_01 with the resulting binary and tape_02 with the source code input
+(this is really important for bootstrapping a text editor)
+
+stage1_assembler-0 should have the sha256sum of 13b45134a88c1c6db349cb40f82269cee9edfce71ac644dc0e137bad053bf5ce
+
+* Step 3 create a better hex assembler
+Now that it is easy(ish) to create text files and we have a really stupid hex assembler, we probably don't want to manually calculate offsets and jumps any more.
+
+So we are going to limit ourselves to single character labels and pointers (:a and @a respectively) which should be enough to make the next step reasonable.
+
+To build our improved hex assembler:
+./bin/vm --rom roms/stage1_assembler-0 --tape_01 stage1/stage1_assembler-1.hex0  --tape_02 roms/stage1_assembler-1
+
+roms/stage1_assembler-1 should have the sha256sum of 156f555fce5b02f52445652b1ed0b443295706cdfbe23c5a021bd4efc77179bb
+
+* Step 4 get even long label support
+Now that we have labels and pointers, I want the ability to have labels like :main_function and :stack_start and be able to reference the absolute address of things in my code like $stack_start and complex objects that have 32bit pointers like &foo_bar.
+
+Hopefully 64 char labels is enough (if not, simply add more NOPs at the end and fix the 2 table address references [Which will alter the checksum accordingly])
+
+To build our last and greatest Hex assembler:
+./bin/vm --rom roms/stage1_assembler-1 --tape_01 stage1/stage1_assembler-2.hex1 --tape_02 roms/stage1_assembler-2
+
+Now tape_02 contains the last hex assembler we will need
+roms/stage1_assembler-2 should have the sha256sum of 2c02c50958f489a660a4915d2a9e207a0c61f411d42628bdaf4dcf6bf7149a9d
+
+* Step 4b Lets make a Line text editor
+Now I don't know about you but I suck at not making mistakes and having to fix a whole line instead of an entire file is a hell of an improvement.
+
+So, lets make a line text editor, (it'll be 916 bytes long and require you to type 1,832 characters perfectly to make it)
+
+You can build this file 2 ways:
+
+1) Cheat and simply use stage1/SET.hex2 and run:
+
+./bin/vm --rom roms/stage1_assembler-2 --tape_01 stage1/SET.hex2 --tape_02 roms/SET
+
+or
+
+2) Manually type in the contents of stage1/SET.hex2 (Minus the comments of course) while running:
+
+./bin/vm --rom roms/stage0_monitor --tape_01 /dev/null --tape_02 temp
+
+Then you can compile the text file with the stage1_assembler-2 that we already made.
+
+From this point on I will assume you are going to take the easy route and simply load the source code using some mechanism you trust or are using SET to manually duplicate the entries of the code files used in each of the proceeding steps.
+
+SET should have the SHA256SUM of 059d38e34275029f2de5f600f08fe01bd13cd173f7da58e3fbec7114074beff2
+
+* Step 5 Lets get us a line macro assembler
+I don't know about you but at this point, I don't wanna convert another instruction into HEX by hand, so to save myself the pain we are going to write the most often ignored but important development in computer programming. The LINE MACRO ASSEMBLER.
+
+At 1792 bytes large and 448 hand converted instructions, this program will allow us to write proper assembly code provided we prefix our assembly code with a definitions file (Which by the way is High_level_prototypes/defs for our VM)
+
+To build our line macro assembler:
+./bin/vm --rom roms/stage1_assembler-2 --tape_01 stage1/M0-macro.hex2 --tape_02 roms/M0 --memory 48K
+
+Now with our new line macro assembler, which with our definition file High_level_prototypes/defs means we can write straight assembly from here on out.
+
+roms/M0 should have the sha256sum of cc31320b390d97409d54afb7c29171a12532aaa66487d1b2e3a0bb3ffe36dc15
+
+* Step 5b Saving a bunch of duplicate work
+Assuming that you have been doing all of the above the hard way on physical hardware with real paper tapes, this step is for you.
+
+Once you have written your definition file, mark it as something special and the following tool will allow you to duplicate the CAT functionality.
+
+To build our tool that concatenates multiple tapes into a single tape output:
+First prepend High_level_prototypes/defs to your stage1/CAT.s file and save it as temp
+
+Then to assemble our first assembly program, we need to run 2 different programs for our different passes.
+
+To Build our first pass is:
+./bin/vm --rom roms/M0 --tape_01 temp --tape_02 temp2 --memory 48K
+
+To finish our build our last pass is:
+./bin/vm --rom roms/stage1_assembler-2 --tape_01 temp2 --tape_02 roms/CAT --memory 48K
+
+roms/CAT should have the sha256sum of 695698ebc7ed1d3acbcded1bd832a6b49b9a7c2a37c216a9fccdc0e89e976e99
+
+And now you have the ability to simply feed tape_01 with tapes in any order you desire and the combination of all those tapes will be in tape_02.
+This also of course could be used for tape duplication if you are noticing wear on any of your tapes.
+
+* Step 6a Build us a Lisp
+If you are anything like me, you'll probably spend some time trying to find the easiest to implement High level programming language for your step after assembly.
+The One thing that you'll find is that actually, Lisp is probably the easiest language to implement after you have a working assembler.
+
+We first need to create our prepared tape:
+cat High_level_prototypes/defs stage2/lisp.s > temp
+
+Then we use our M0 Line macro assembler to convert our assembly into hex2 format:
+./bin/vm --rom roms/M0 --tape_01 temp --tape_02 temp2 --memory 256K
+
+Then we need to assemble that hex into our desired program:
+./bin/vm --rom roms/stage1_assembler-2 --tape_01 temp2 --tape_02 roms/lisp --memory 48K
+
+roms/lisp should have the sha256sum of 96ade767f30e3d9037a6c597cefb103942c8ec104264a3551017f091b10646e1
+
+Our lisp will first attempt to evaluate any code in tape_01 and then evaluate any code that the user types in.
+It is recommended to run with no less than 4MB of Memory
+
+* Step 6b Build us a Forth
+Since forth fans kept telling me Forth is easier to implement than lisp, I also implemented a Forth but it certainly took far longer to get the bugs out.
+You'll note that this forth is only 4372 bytes large (almost half the size of the lisp) but you'll also note that it is also in a much more primitive state.
+
+Having done all of the above; I must say if I had to start with this forth or the hex monitor, I would always choose the forth but I wouldn't dare dream of trying to jump straight to forth from Hex.
+
+If you want to bootstrap anything, NEVER EVER EVER START WITH FORTH. Get yourself a good assembler first and you might find writing a garbage collected lisp or a C compiler is actually much easier.
+
+We first need to create our prepared tape:
+cat High_level_prototypes/defs stage2/forth.s > temp
+
+Then we use our M0 Line macro assembler to convert our assembly into hex2 format:
+./bin/vm --rom roms/M0 --tape_01 temp --tape_02 temp2 --memory 128K
+
+Then we need to assemble that hex into our desired program:
+./bin/vm --rom roms/stage1_assembler-2 --tape_01 temp2 --tape_02 roms/forth --memory 48K
+
+roms/forth should with the sha256sum of f4bbf9e9c4828170d0c153ac265382dc705643f95efd2a029243326d426be5a4
+
+Our forth will first attempt to evaluate any code in tape_01 and then evaluate any code that the user types in
+(Otherwise there is no way for a forth fan to have a chance against the lisp in terms of being able to bootstrap something cool)
+Tuning needs to be done to run with any less than 4MB of Memory
+
+* Step 6c Build us a C compiler
+Since I got tired of people saying you can't write a C compiler in assembly, I did exactly that and as you can see it was completed relatively quickly.
+You'll note that the C compiler is 16370 bytes large, making it larger than the Lisp and FORTH put together but not much harder to implement than the lisp.
+
+Having done all of the above; I must say one needs a really solid assembler and a minimal disassembler to effectively bootstrap a C compiler (at least until you get the point that the tokenizer is working).
+
+We first need to create our prepared tape:
+cat High_level_prototypes/defs stage2/cc_x86.s > cc_TEMP
+Then we use our M0 Line macro assembler to convert our assembly into hex2 format:
+./bin/vm --rom roms/M0 --tape_01 cc_TEMP --tape_02 cc_TEMP2 --memory 256K
+
+Then we need to assemble that hex into our desired program:
+./bin/vm --rom roms/stage1_assembler-2 --tape_01 cc_TEMP2 --tape_02 roms/cc_x86 --memory 48K
+
+roms/cc_x86 should with the sha256sum of 1b44b454b8e7beab41ecc4fb81220ef0a396bfeb954a3589861b6807dea0c313
+
+Our C compiler will read any code in tape_01 and output the compiled output to tape_02.
+The compiled output is macro assembly (allowing for easy inspection) which then must go through the appropriate macro assembler and hex2 steps to become a working binary.
+Should you wish to port the C compiler to a different target, one need only update the strings and a few minor places in the code; looking at M2-Planet's multi-arch support will cover all of those questions quickly.
