@@ -2,24 +2,38 @@
     .section .text.bios
 
 _start:	
-    addi a0, x0, 0x68
+    # UART base address
     li a1, 0x10000000
-    sb a0, (a1) # 'h'
+    # LSR offset (Line Status Register at offset 0x05)
+    li a2, 0x10000005
 
-    addi a0, x0, 0x65
-    sb a0, (a1) # 'e'
-
-    addi a0, x0, 0x6C
-    sb a0, (a1) # 'l'
-
-    addi a0, x0, 0x6C
-    sb a0, (a1) # 'l'
-
-    addi a0, x0, 0x6F
-    sb a0, (a1) # 'o'
-
+echo_loop:
+    # Poll LSR bit 0 (Data Ready)
+    lb a0, (a2)
+    andi a0, a0, 1
+    beq a0, x0, echo_loop  # If no data ready, loop back
+    
+    # Data is ready, read from RBR (offset 0x00, same as base)
+    lb a0, (a1)
+    
+    # Wait for THR to be empty (LSR bit 5 = Transmit Holding Register Empty)
+wait_tx:
+    lb a3, (a2)
+    andi a3, a3, 0x20  # Mask bit 5
+    beq a3, x0, wait_tx  # If not empty, wait
+    
+    # Echo the character back
+    sb a0, (a1)
+    
+    # Wait for THR to be empty again before sending newline
+wait_tx_newline:
+    lb a3, (a2)
+    andi a3, a3, 0x20  # Mask bit 5
+    beq a3, x0, wait_tx_newline  # If not empty, wait
+    
+    # Send newline
     addi a0, x0, 0x0A
-    sb a0, (a1) # '\n'
-
-loop: 
-    j loop
+    sb a0, (a1)
+    
+    # Continue loop
+    j echo_loop
