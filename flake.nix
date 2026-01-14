@@ -22,9 +22,9 @@
           buildInputs = with pkgs; [
             pkgsCross.riscv64-embedded.buildPackages.gcc
             pkgsCross.riscv64-embedded.buildPackages.gdb
-            just
             qemu
             clang-tools
+            tup
           ];
         };
       }
