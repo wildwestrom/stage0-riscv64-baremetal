@@ -236,14 +236,13 @@ execute_code:
 
     # Jump to the code that we input by hand
     la t0, code_buffer
-    fence.i
     jr t0
 
 done:
     # Halt (infinite loop)
     j done
 
-    .section .data
+    .section .bss
     .balign 4
 code_buffer:
     .space 0x1000

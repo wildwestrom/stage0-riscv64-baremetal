@@ -5,8 +5,8 @@ OBJCOPY := riscv64-none-elf-objcopy
 ASFLAGS := -march=rv64i -mabi=lp64
 CFLAGS := -Oz -march=rv64i -mabi=lp64 -mcmodel=medany -ffreestanding -fno-builtin -fno-stack-protector -fomit-frame-pointer -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -ffunction-sections -fdata-sections
 C_ASMFLAGS := $(CFLAGS) -fverbose-asm
-LDFLAGS := -T baremetal.ld -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none -Wl,--strip-all
-LDFLAGS_DEBUG := -T baremetal.ld -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none
+LDFLAGS := -Ttext=0x80000000 -e _start -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none -Wl,--strip-all
+LDFLAGS_DEBUG := -Ttext=0x80000000 -e _start -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none
 
 QEMU_TIMEOUT := 0.1s
 
@@ -52,10 +52,10 @@ $(BUILD_DIR)/stage0_monitor.s: $(HEX0_C) | $(BUILD_DIR)
 $(BUILD_DIR)/%.o: $(HEX0_C) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/%.elf: $(BUILD_DIR)/%.o baremetal.ld
+$(BUILD_DIR)/%.elf: $(BUILD_DIR)/%.o
 	$(CC) $(LDFLAGS) $< -o $@
 
-$(BUILD_DIR)/%.debug.elf: $(BUILD_DIR)/%.o baremetal.ld
+$(BUILD_DIR)/%.debug.elf: $(BUILD_DIR)/%.o
 	$(CC) $(LDFLAGS_DEBUG) $< -o $@
 
 $(BUILD_DIR)/%.bin: $(BUILD_DIR)/%.elf
@@ -66,7 +66,7 @@ $(BUILD_DIR)/stage0_monitor.bin: $(BUILD_DIR)/stage0_monitor.s
 $(BUILD_DIR)/hex0.o: stage0/hex0.s | $(BUILD_DIR)
 	$(AS) $(ASFLAGS) $< -o $@
 
-$(BUILD_DIR)/hex0.elf: $(BUILD_DIR)/hex0.o baremetal.ld
+$(BUILD_DIR)/hex0.elf: $(BUILD_DIR)/hex0.o
 	$(CC) $(LDFLAGS) $< -o $@
 
 $(BUILD_DIR)/%.hex0: $(BUILD_DIR)/%.bin
@@ -89,8 +89,8 @@ $(BUILD_DIR)/echo.ok: $(BUILD_DIR)/echo.out
 
 # This tests hex0 loading itself, then using itself to load echo.
 # This verifies that hex0 can bootstrap itself and then load other programs.
-$(BUILD_DIR)/hex0_echo.out: force_test_hex0 $(BUILD_DIR)/stage0_monitor.hex0 $(BUILD_DIR)/echo.hex0 $(BUILD_DIR)/stage0_monitor.bin | $(BUILD_DIR)
-	{ cat $(BUILD_DIR)/stage0_monitor.hex0; printf '\x04'; cat $(BUILD_DIR)/echo.hex0; printf '\x04'; printf 'test\n'; } | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/stage0_monitor.bin > $@ 2>&1 || true
+$(BUILD_DIR)/hex0_echo.out: force_test_hex0 $(BUILD_DIR)/hex0.hex0 $(BUILD_DIR)/echo.hex0 $(BUILD_DIR)/hex0.bin | $(BUILD_DIR)
+	{ cat $(BUILD_DIR)/hex0.hex0; printf '\x04'; cat $(BUILD_DIR)/echo.hex0; printf '\x04'; printf 'test\n'; } | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/hex0.bin > $@ 2>&1 || true
 
 $(BUILD_DIR)/hex0_echo.ok: $(BUILD_DIR)/hex0_echo.out
 	out=$$(grep -x '[tes]' $< | tr -d '\n'); [ "$$out" = test ]

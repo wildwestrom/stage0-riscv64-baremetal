@@ -5,6 +5,9 @@
 # I add a newline after each character as it's easier to verify it's working.
 
 _start:
+    # Set up stack (same absolute address as all programs)
+    li sp, 0x80002220
+
     # UART base address
     li a1, 0x10000000
     # LSR offset (Line Status Register at offset 0x05)
