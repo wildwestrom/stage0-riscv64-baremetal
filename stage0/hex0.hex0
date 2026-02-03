@@ -1,0 +1,164 @@
+## Copyright (C) 2026 Christian Westrom
+## This file is part of stage0.
+##
+## stage0 is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## stage0 is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with stage0.  If not, see <http://www.gnu.org/licenses/>.
+
+# hex0 - A minimal hex loader for RISC-V (bare metal, QEMU virt)
+# Reads hex digits from UART, converts pairs to bytes, stores in memory.
+# On Ctrl-D, jumps to the loaded code.
+
+; Register use:
+; s0: holder (first nibble)
+; s1: toggle (1 = first nibble, 0 = second nibble)
+; s2: pointer to code buffer
+
+# _start:
+	# Setup stack pointer
+	17 31 00 00       # auipc sp, 0x3
+	13 01 01 18       # addi sp, sp, 384
+	# Setup code buffer pointer
+	17 19 00 00       # auipc s2, 0x1
+	13 09 89 17       # addi s2, s2, 376
+	# Initialize toggle and holder
+	93 04 10 00       # addi s1, x0, 1
+	13 04 00 00       # addi s0, x0, 0
+
+# loop:
+	EF 00 80 04       # jal ra, read_char
+	# Check for Ctrl-D
+	93 02 40 00       # addi t0, x0, 4
+	63 16 55 00       # bne a0, t0, process_input
+	EF 00 00 0E       # jal ra, execute_code
+	6F F0 1F FF       # jal x0, loop
+
+# process_input:
+	EF 00 40 05       # jal ra, hex
+	E3 44 05 FE       # blt a0, x0, loop
+	63 88 04 00       # beq s1, x0, process_second_nibble
+	# Process first nibble
+	13 74 F5 00       # andi s0, a0, 0xF
+	93 04 00 00       # addi s1, x0, 0
+	6F F0 9F FD       # jal x0, loop
+
+# process_second_nibble:
+	13 14 44 00       # slli s0, s0, 4
+	13 75 F5 00       # andi a0, a0, 0xF
+	33 05 A4 00       # add a0, s0, a0
+	93 04 10 00       # addi s1, x0, 1
+	# Write out byte
+	23 00 A9 00       # sb a0, 0(s2)
+	# Update our pointer
+	13 09 19 00       # addi s2, s2, 1
+	6F F0 DF FB       # jal x0, loop
+
+# read_char:
+	B7 02 00 10       # lui t0, 0x10000
+	9B 82 52 00       # addiw t0, t0, 5
+# poll_rx:
+	03 85 02 00       # lb a0, 0(t0)
+	13 75 15 00       # andi a0, a0, 1
+	E3 0C 05 FE       # beq a0, x0, poll_rx
+	B7 02 00 10       # lui t0, 0x10000
+	03 85 02 00       # lb a0, 0(t0)
+	67 80 00 00       # jalr x0, ra, 0
+
+# hex:
+	# Deal with line comments starting with #
+	93 02 30 02       # addi t0, x0, 0x23
+	63 00 55 06       # beq a0, t0, ascii_comment
+	# Deal with line comments starting with ;
+	93 02 B0 03       # addi t0, x0, 0x3B
+	63 0C 55 04       # beq a0, t0, ascii_comment
+	# Deal with all ASCII less than '0'
+	93 02 00 03       # addi t0, x0, 0x30
+	63 44 55 04       # blt a0, t0, ascii_other
+	# Deal with '0' through '9'
+	93 02 A0 03       # addi t0, x0, 0x3A
+	63 44 55 02       # blt a0, t0, ascii_num
+	# Deal with all ASCII less than 'A'
+	93 02 10 04       # addi t0, x0, 0x41
+	63 4C 55 02       # blt a0, t0, ascii_other
+	# Deal with 'A' through 'F'
+	93 02 70 04       # addi t0, x0, 0x47
+	63 44 55 02       # blt a0, t0, ascii_high
+	# Deal with all ASCII less than 'a'
+	93 02 10 06       # addi t0, x0, 0x61
+	63 44 55 02       # blt a0, t0, ascii_other
+	# Deal with 'a' through 'f'
+	93 02 70 06       # addi t0, x0, 0x67
+	63 48 55 00       # blt a0, t0, ascii_low
+	# Deal with everything else
+	6F 00 C0 01       # jal x0, ascii_other
+
+# ascii_num:
+	13 05 05 FD       # addi a0, a0, -48
+	67 80 00 00       # jalr x0, ra, 0
+
+# ascii_low:
+	13 05 95 FA       # addi a0, a0, -87
+	67 80 00 00       # jalr x0, ra, 0
+
+# ascii_high:
+	13 05 95 FC       # addi a0, a0, -55
+	67 80 00 00       # jalr x0, ra, 0
+
+# ascii_other:
+	13 05 F0 FF       # addi a0, x0, -1
+	67 80 00 00       # jalr x0, ra, 0
+
+# ascii_comment:
+	13 01 01 FF       # addi sp, sp, -16
+	23 30 11 00       # sd ra, 0(sp)
+	EF F0 5F F7       # jal ra, read_char
+	93 02 D0 00       # addi t0, x0, 0xD
+	E3 18 55 FE       # bne a0, t0, ascii_comment
+	83 30 01 00       # ld ra, 0(sp)
+	13 01 01 01       # addi sp, sp, 16
+	6F F0 DF FD       # jal x0, ascii_other
+
+# execute_code:
+	# Zero all registers before jump
+	13 05 00 00       # addi a0, x0, 0
+	93 05 00 00       # addi a1, x0, 0
+	13 06 00 00       # addi a2, x0, 0
+	93 06 00 00       # addi a3, x0, 0
+	13 07 00 00       # addi a4, x0, 0
+	93 07 00 00       # addi a5, x0, 0
+	13 08 00 00       # addi a6, x0, 0
+	93 08 00 00       # addi a7, x0, 0
+	93 02 00 00       # addi t0, x0, 0
+	13 03 00 00       # addi t1, x0, 0
+	93 03 00 00       # addi t2, x0, 0
+	13 0E 00 00       # addi t3, x0, 0
+	93 0E 00 00       # addi t4, x0, 0
+	13 0F 00 00       # addi t5, x0, 0
+	93 0F 00 00       # addi t6, x0, 0
+	13 04 00 00       # addi s0, x0, 0
+	93 04 00 00       # addi s1, x0, 0
+	93 09 00 00       # addi s3, x0, 0
+	13 0A 00 00       # addi s4, x0, 0
+	93 0A 00 00       # addi s5, x0, 0
+	13 0B 00 00       # addi s6, x0, 0
+	93 0B 00 00       # addi s7, x0, 0
+	13 0C 00 00       # addi s8, x0, 0
+	93 0C 00 00       # addi s9, x0, 0
+	13 0D 00 00       # addi s10, x0, 0
+	93 0D 00 00       # addi s11, x0, 0
+	# Load the code that we input by hand
+	97 12 00 00       # auipc t0, 0x1
+	93 82 42 01       # addi t0, t0, 20
+	67 80 02 00       # jalr x0, t0, 0
+
+# done:
+	6F 00 00 00       # jal x0, done

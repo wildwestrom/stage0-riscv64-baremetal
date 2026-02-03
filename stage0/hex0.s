@@ -1,4 +1,5 @@
 # Copyright (C) 2016 Jeremiah Orians
+# Copyright (C) 2026 Christian Westrom
 # This file is part of stage0.
 #
 # stage0 is free software: you can redistribute it and/or modify

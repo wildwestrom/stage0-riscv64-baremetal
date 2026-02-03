@@ -26,7 +26,7 @@ C_BINS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.bin)
 C_ASMS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.s)
 HEX0_ASM := $(BUILD_DIR)/stage0_monitor.s
 
-.PHONY: all clean test_echo test_hex0 test_hex0_prototype prototypes debug force_test_echo force_test_hex0
+.PHONY: all clean test_echo test_hex0 test_hex0_handwritten test_hex0_prototype prototypes debug force_test_echo force_test_hex0 verify_hex0
 
 all: $(HEX0S)
 
@@ -70,11 +70,20 @@ $(BUILD_DIR)/stage0_monitor.elf: $(BUILD_DIR)/stage0_monitor.o stage0/high_level
 $(BUILD_DIR)/stage0_monitor.debug.elf: $(BUILD_DIR)/stage0_monitor.o stage0/high_level_prototype/stage0_monitor.ld
 	$(CC) -T stage0/high_level_prototype/stage0_monitor.ld -e _start -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none $< -o $@
 
+# Build hex0 from assembly (for comparison/debugging)
 $(BUILD_DIR)/hex0.o: stage0/hex0.s | $(BUILD_DIR)
 	$(AS) $(ASFLAGS) $< -o $@
 
 $(BUILD_DIR)/hex0.elf: $(BUILD_DIR)/hex0.o
 	$(CC) $(LDFLAGS) $< -o $@
+
+# Build hex0 from hand-written hex0.hex0 using our converter script
+$(BUILD_DIR)/hex0_handwritten.bin: stage0/hex0.hex0 hex0_to_bin.sh | $(BUILD_DIR)
+	./hex0_to_bin.sh $< $@
+
+# Verify that hex0.hex0 produces identical binary to assembly-generated hex0.bin
+verify_hex0: $(BUILD_DIR)/hex0.bin $(BUILD_DIR)/hex0_handwritten.bin
+	diff $^ && echo "hex0.hex0 matches hex0.s output"
 
 $(BUILD_DIR)/%.hex0: $(BUILD_DIR)/%.bin
 	xxd -p $< | tr -d '\n' > $@
@@ -103,6 +112,17 @@ $(BUILD_DIR)/hex0_echo.out: force_test_hex0 $(BUILD_DIR)/hex0.hex0 $(BUILD_DIR)/
 	{ cat $(BUILD_DIR)/hex0.hex0; printf '\x04'; cat $(BUILD_DIR)/echo.hex0; printf '\x04'; printf 'test\n'; } | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/hex0.bin > $@ 2>&1 || true
 
 $(BUILD_DIR)/hex0_echo.ok: $(BUILD_DIR)/hex0_echo.out
+	grep -q 'test' $<
+	touch $@
+
+# Test the hand-written hex0.hex0 directly (converted via hex0_to_bin.sh)
+test_hex0_handwritten: $(BUILD_DIR)/echo.ok $(BUILD_DIR)/hex0_handwritten_echo.ok
+
+# This tests hex0 (from hex0.hex0) loading itself, then using itself to load echo.
+$(BUILD_DIR)/hex0_handwritten_echo.out: force_test_hex0 $(BUILD_DIR)/hex0.hex0 $(BUILD_DIR)/echo.hex0 $(BUILD_DIR)/hex0_handwritten.bin | $(BUILD_DIR)
+	{ cat $(BUILD_DIR)/hex0.hex0; printf '\x04'; cat $(BUILD_DIR)/echo.hex0; printf '\x04'; printf 'test\n'; } | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/hex0_handwritten.bin > $@ 2>&1 || true
+
+$(BUILD_DIR)/hex0_handwritten_echo.ok: $(BUILD_DIR)/hex0_handwritten_echo.out
 	grep -q 'test' $<
 	touch $@
 
