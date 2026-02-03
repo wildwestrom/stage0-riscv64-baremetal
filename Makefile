@@ -70,7 +70,7 @@ test_echo: $(BUILD_DIR)/echo.ok
 
 # This tests the echo program which is just supposed to echo each character back with a newline.
 $(BUILD_DIR)/echo.out: $(BUILD_DIR)/echo.bin | $(BUILD_DIR)
-	{ sleep 0.5; printf 'test'; } | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -kernel $(BUILD_DIR)/echo.bin > $@ 2>&1 || true
+	{ sleep 0.5; printf 'test'; } | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/echo.bin > $@ 2>&1 || true
 
 # Now we see if the test program echoed the correct sequence.
 $(BUILD_DIR)/echo.ok: $(BUILD_DIR)/echo.out
@@ -82,7 +82,7 @@ $(BUILD_DIR)/echo.ok: $(BUILD_DIR)/echo.out
 # This test tests the test program via hex0, ensuring that hex0 is working.
 $(BUILD_DIR)/hex0_echo.out: $(BUILD_DIR)/echo.ok $(BUILD_DIR)/echo.hex0 $(BUILD_DIR)/stage0_monitor.bin | $(BUILD_DIR)
 # There's a race condition where qemu might not be ready to read input, so we sleep.
-	{ sleep 0.5; cat $(BUILD_DIR)/echo.hex0; printf '\x04'; printf 'test\n'; } | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -kernel $(BUILD_DIR)/stage0_monitor.bin > $@ 2>&1 || true
+	{ sleep 0.5; cat $(BUILD_DIR)/echo.hex0; printf '\x04'; printf 'test\n'; } | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/stage0_monitor.bin > $@ 2>&1 || true
 
 # We should get the exact same result as the previous test.
 $(BUILD_DIR)/hex0_echo.ok: $(BUILD_DIR)/hex0_echo.out
