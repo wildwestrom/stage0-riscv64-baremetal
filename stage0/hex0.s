@@ -24,19 +24,19 @@
 _start:
     # Set up stack (grow downward from a safe location in RAM)
     la sp, stack_top
-    
+
     # Set up memory pointer for storing hex bytes
     la s2, code_buffer  # bp -> s2: pointer to where we store bytes
-    
+
     # Initialize toggle (di -> s1)
     li s1, 1          # toggle: 1 = first nibble, 0 = second nibble
-    
+
     # Initialize holder (si -> s0)
     li s0, 0          # holder for first nibble
 
 loop:
     call read_char
-    
+
     # Check for C-d (Ctrl-D = 4)
     li t0, 4
     bne a0, t0, check_clear_screen
@@ -56,18 +56,18 @@ check_enter_key:
     bne a0, t0, process_input
     call display_newline
     j loop
-    
+
 process_input:
     # Otherwise just print the char
     call print_char    # Show the user what they input
     call hex           # Convert to what we want (result in a0)
-    
+
     # Check if it is hex (a0 < 0 means invalid)
     blt a0, zero, loop  # Don't use nonhex chars
-    
+
     # Check if toggled (s1 == 0 means second nibble)
     beq s1, zero, process_second_nibble
-    
+
     # Process first byte of pair
     andi s0, a0, 0x0F  # Store first nibble in s0
     li s1, 0           # Flip the toggle
@@ -78,11 +78,11 @@ process_second_nibble:
     andi a0, a0, 0x0F  # Mask second nibble
     add a0, s0, a0     # Combine nibbles
     li s1, 1           # Flip the toggle
-    
+
     # Write byte to memory at [s2]
     sb a0, 0(s2)       # Write our byte out
     addi s2, s2, 1     # Increment our pointer by 1
-    
+
     j loop
 
 print_char:
@@ -93,7 +93,7 @@ wait_tx:
     lb t1, 0(t0)
     andi t1, t1, 0x20  # Mask bit 5
     beq t1, zero, wait_tx  # If not empty, wait
-    
+
     # Write character to UART
     li t0, UART_BASE
     sb a0, 0(t0)
@@ -107,7 +107,7 @@ poll_rx:
     lb a0, 0(t0)
     andi a0, a0, 1
     beq a0, zero, poll_rx  # If no data ready, loop back
-    
+
     # Data is ready, read from RBR (offset 0x00, same as base)
     li t0, UART_BASE
     lb a0, 0(t0)
@@ -143,35 +143,35 @@ hex:
     # deal with line comments starting with #
     li t0, 35
     beq a0, t0, ascii_comment
-    
+
     # deal with line comments starting with ;
     li t0, 59
     beq a0, t0, ascii_comment
-    
+
     # deal all ascii less than 0
     li t0, 48
     blt a0, t0, ascii_other
-    
+
     # deal with 0-9
     li t0, 58
     blt a0, t0, ascii_num
-    
+
     # deal with all ascii less than A
     li t0, 65
     blt a0, t0, ascii_other
-    
+
     # deal with A-F
     li t0, 71
     blt a0, t0, ascii_high
-    
+
     # deal with all ascii less than a
     li t0, 97
     blt a0, t0, ascii_other
-    
+
     # deal with a-f
     li t0, 103
     blt a0, t0, ascii_low
-    
+
     # The rest that remains needs to be ignored
     j ascii_other
 
@@ -233,7 +233,7 @@ execute_code:
     li s9, 0
     li s10, 0
     li s11, 0
-    
+
     # Jump to the code that we input by hand
     la t0, code_buffer
     fence.i
