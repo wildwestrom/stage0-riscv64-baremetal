@@ -65,24 +65,27 @@ static int hex(int c) {
   }
 
   /* Deal with non-hex chars*/
-  if ('0' > c)
+  if ('0' > c) {
     return -1;
+  }
 
   /* Deal with 0-9 */
-  if ('9' >= c)
+  if ('9' >= c) {
     return (c - 48);
+  }
 
   /* Convert a-f to A-F*/
   c = c & 0xDF;
 
   /* Get rid of everything below A */
-  if ('A' > c)
+  if ('A' > c) {
     return -1;
+  }
 
   /* Deal with A-F */
-  if ('F' >= c)
+  if ('F' >= c) {
     return (c - 55);
-
+  }
   /* Everything else is garbage */
   return -1;
 }
@@ -99,7 +102,7 @@ int main(void) {
   uint8_t *write_end = code_buffer + CODE_BUFFER_MAX;
 
   for (;;) {
-    int c = uart_read();
+    uint8_t c = uart_read();
     if (4 == c) {
       display_newline();
       execute_code();
