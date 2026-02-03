@@ -25,16 +25,22 @@
 
 #define CODE_BUFFER_MAX 0x1000u
 
-extern uint8_t _stack_top;
-extern uint8_t __bss_start;
-extern uint8_t __bss_end;
+/* Define code_buffer and stack in assembly to control memory layout.
+ * This matches the layout in stage0/hex0.s:
+ * - code_buffer: 4KB for storing loaded hex bytes
+ * - stack: 4KB below code_buffer, grows downward from stack_top
+ * Both must be defined together to prevent overlapping addresses.
+ */
+__asm__(".section .bss\n"
+        ".balign 16\n"
+        "code_buffer:\n"
+        ".space 0x1000\n"
+        "stack_bottom:\n"
+        ".space 0x1000\n"
+        "stack_top:\n");
 
-static inline void uart_write(uint8_t value) {
-  volatile uint8_t *lsr = (volatile uint8_t *)UART_LSR;
-  while (0 == (*lsr & UART_LSR_THR_EMPTY)) {
-  }
-  *(volatile uint8_t *)UART_BASE = value;
-}
+extern uint8_t code_buffer[];
+extern uint8_t stack_top;
 
 static inline uint8_t uart_read(void) {
   volatile uint8_t *lsr = (volatile uint8_t *)UART_LSR;
@@ -45,16 +51,9 @@ static inline uint8_t uart_read(void) {
 
 static void line_comment(void) {
   int c = uart_read();
-  uart_write((uint8_t)c);
   while ((10 != c) && (13 != c)) {
     c = uart_read();
-    uart_write((uint8_t)c);
   }
-}
-
-static void display_newline(void) {
-  uart_write(13);
-  uart_write(10);
 }
 
 static int hex(int c) {
@@ -90,10 +89,30 @@ static int hex(int c) {
   return -1;
 }
 
-/* Standard C main program */
-static uint8_t code_buffer[CODE_BUFFER_MAX];
+/* Entry point must be first in the binary so that when code_buffer is executed,
+ * it starts here (not at main). This matches the assembly version layout.
+ * We declare this first and put it in .text (not a subsection) to ensure it comes first.
+ */
+void _start(void) __attribute__((naked, section(".text")));
+void _start(void) {
+  /* Set up stack and call main.
+   * Note: We rely on QEMU initializing RAM to zero, so no explicit BSS clearing.
+   * This matches the assembly version in stage0/hex0.s.
+   */
+  __asm__ volatile("la sp, stack_top\n"      // Initialize stack pointer to top of stack
+                   "call main\n"              // Call main function
+                   "1:\n"
+                   "j 1b\n");                 // Infinite loop when main returns
+}
 
-static void execute_code(void) { ((void (*)(void))code_buffer)(); }
+/* Execute the code loaded into code_buffer.
+ * We use inline assembly to jump to the code_buffer address, matching the
+ * behavior of the assembly version in stage0/hex0.s (lines 175-176).
+ */
+static void execute_code(void) {
+  __asm__ volatile("la t0, code_buffer\n"
+                   "jr t0\n");
+}
 
 int main(void) {
   int toggle = 0;
@@ -104,12 +123,10 @@ int main(void) {
   for (;;) {
     uint8_t c = uart_read();
     if (4 == c) {
-      display_newline();
       execute_code();
       continue;
     }
 
-    uart_write((uint8_t)c);
     int R0 = hex(c);
     if (0 <= R0) {
       if (toggle) {
@@ -125,20 +142,4 @@ int main(void) {
       toggle = !toggle;
     }
   }
-}
-
-void _start(void) __attribute__((naked, section(".text.start")));
-void _start(void) {
-  __asm__ volatile("la sp, _stack_top\n"
-                   "la t0, __bss_start\n"
-                   "la t1, __bss_end\n"
-                   "1:\n"
-                   "bgeu t0, t1, 2f\n"
-                   "sd zero, 0(t0)\n"
-                   "addi t0, t0, 8\n"
-                   "j 1b\n"
-                   "2:\n"
-                   "call main\n"
-                   "3:\n"
-                   "j 3b\n");
 }

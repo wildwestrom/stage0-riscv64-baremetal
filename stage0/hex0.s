@@ -17,10 +17,6 @@
     .global _start
     .section .text
 
-# UART base address
-    .equ UART_BASE, 0x10000000
-    .equ UART_LSR,  0x10000005
-
 _start:
     # Set up stack (grow downward from a safe location in RAM)
     la sp, stack_top
@@ -39,28 +35,12 @@ loop:
 
     # Check for C-d (Ctrl-D = 4)
     li t0, 4
-    bne a0, t0, check_clear_screen
+    bne a0, t0, process_input
     call execute_code
     j loop
 
-check_clear_screen:
-    # Check for C-l (Ctrl-L = 12)
-    li t0, 12
-    bne a0, t0, check_enter_key
-    call clear_screen
-    j loop
-
-check_enter_key:
-    # Check for [Enter] (13)
-    li t0, 13
-    bne a0, t0, process_input
-    call display_newline
-    j loop
-
 process_input:
-    # Otherwise just print the char
-    call print_char    # Show the user what they input
-    call hex           # Convert to what we want (result in a0)
+    call hex            # Convert to what we want (result in a0)
 
     # Check if it is hex (a0 < 0 means invalid)
     blt a0, zero, loop  # Don't use nonhex chars
@@ -85,23 +65,9 @@ process_second_nibble:
 
     j loop
 
-print_char:
-    # Routine: output char in a0 to UART
-    # Wait for THR to be empty (LSR bit 5 = Transmit Holding Register Empty)
-    li t0, UART_LSR
-wait_tx:
-    lb t1, 0(t0)
-    andi t1, t1, 0x20  # Mask bit 5
-    beq t1, zero, wait_tx  # If not empty, wait
-
-    # Write character to UART
-    li t0, UART_BASE
-    sb a0, 0(t0)
-    ret
-
 read_char:
     # Routine: read a char into a0 from UART
-    li t0, UART_LSR
+    li t0, 0x10000005  #UART_LSR
 poll_rx:
     # Poll LSR bit 0 (Data Ready)
     lb a0, 0(t0)
@@ -109,34 +75,8 @@ poll_rx:
     beq a0, zero, poll_rx  # If no data ready, loop back
 
     # Data is ready, read from RBR (offset 0x00, same as base)
-    li t0, UART_BASE
+    li t0, 0x10000000 # UART_BASE
     lb a0, 0(t0)
-    ret
-
-clear_screen:
-    # Routine: clears the display (for serial console, just print newlines)
-    addi sp, sp, -16
-    sd ra, 0(sp)
-    li t0, 24          # Number of lines to clear
-clear_loop:
-    li a0, 10          # Newline character
-    call print_char
-    addi t0, t0, -1
-    bne t0, zero, clear_loop
-    ld ra, 0(sp)
-    addi sp, sp, 16
-    ret
-
-display_newline:
-    # Routine: print a newline
-    addi sp, sp, -16
-    sd ra, 0(sp)
-    li a0, 13          # Carriage return
-    call print_char
-    li a0, 10          # Line feed
-    call print_char
-    ld ra, 0(sp)
-    addi sp, sp, 16
     ret
 
 hex:
@@ -195,16 +135,13 @@ ascii_comment:
     addi sp, sp, -16
     sd ra, 0(sp)
     call read_char
-    call print_char
     li t0, 13
     bne a0, t0, ascii_comment
-    call display_newline
     ld ra, 0(sp)
     addi sp, sp, 16
     j ascii_other
 
 execute_code:
-    call display_newline
     # Zero all registers before jump (except sp and code location)
     li a0, 0
     li a1, 0

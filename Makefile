@@ -26,7 +26,7 @@ C_BINS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.bin)
 C_ASMS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.s)
 HEX0_ASM := $(BUILD_DIR)/stage0_monitor.s
 
-.PHONY: all clean test_echo test_hex0 prototypes debug force_test_echo force_test_hex0
+.PHONY: all clean test_echo test_hex0 test_hex0_prototype prototypes debug force_test_echo force_test_hex0
 
 all: $(HEX0S)
 
@@ -63,6 +63,13 @@ $(BUILD_DIR)/%.bin: $(BUILD_DIR)/%.elf
 
 $(BUILD_DIR)/stage0_monitor.bin: $(BUILD_DIR)/stage0_monitor.s
 
+# Special rule for stage0_monitor to use linker script that ensures _start comes first
+$(BUILD_DIR)/stage0_monitor.elf: $(BUILD_DIR)/stage0_monitor.o stage0/high_level_prototype/stage0_monitor.ld
+	$(CC) -T stage0/high_level_prototype/stage0_monitor.ld -e _start -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none -Wl,--strip-all $< -o $@
+
+$(BUILD_DIR)/stage0_monitor.debug.elf: $(BUILD_DIR)/stage0_monitor.o stage0/high_level_prototype/stage0_monitor.ld
+	$(CC) -T stage0/high_level_prototype/stage0_monitor.ld -e _start -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none $< -o $@
+
 $(BUILD_DIR)/hex0.o: stage0/hex0.s | $(BUILD_DIR)
 	$(AS) $(ASFLAGS) $< -o $@
 
@@ -72,8 +79,11 @@ $(BUILD_DIR)/hex0.elf: $(BUILD_DIR)/hex0.o
 $(BUILD_DIR)/%.hex0: $(BUILD_DIR)/%.bin
 	xxd -p $< | tr -d '\n' > $@
 
-# This is meant to automate testing the hex binaries.
-test_hex0: $(BUILD_DIR)/echo.ok $(BUILD_DIR)/hex0_echo.ok $(HEX0_ASM)
+# This tests the hand-written assembly hex0.
+test_hex0: $(BUILD_DIR)/echo.ok $(BUILD_DIR)/hex0_echo.ok
+
+# This tests the C prototype stage0_monitor.
+test_hex0_prototype: $(BUILD_DIR)/echo.ok $(BUILD_DIR)/hex0_prototype_echo.ok $(HEX0_ASM)
 
 # Run only the echo test program.
 test_echo: $(BUILD_DIR)/echo.ok
@@ -87,12 +97,21 @@ $(BUILD_DIR)/echo.ok: $(BUILD_DIR)/echo.out
 	out=$$(grep -x '[tes]' $< | tr -d '\n'); [ "$$out" = test ]
 	touch $@
 
-# This tests hex0 loading itself, then using itself to load echo.
+# This tests hex0 (assembly) loading itself, then using itself to load echo.
 # This verifies that hex0 can bootstrap itself and then load other programs.
 $(BUILD_DIR)/hex0_echo.out: force_test_hex0 $(BUILD_DIR)/hex0.hex0 $(BUILD_DIR)/echo.hex0 $(BUILD_DIR)/hex0.bin | $(BUILD_DIR)
 	{ cat $(BUILD_DIR)/hex0.hex0; printf '\x04'; cat $(BUILD_DIR)/echo.hex0; printf '\x04'; printf 'test\n'; } | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/hex0.bin > $@ 2>&1 || true
 
 $(BUILD_DIR)/hex0_echo.ok: $(BUILD_DIR)/hex0_echo.out
+	out=$$(grep -x '[tes]' $< | tr -d '\n'); [ "$$out" = test ]
+	touch $@
+
+# This tests stage0_monitor (C) loading itself, then using itself to load echo.
+# This verifies that the C prototype can bootstrap itself and then load other programs.
+$(BUILD_DIR)/hex0_prototype_echo.out: force_test_hex0 $(BUILD_DIR)/stage0_monitor.hex0 $(BUILD_DIR)/echo.hex0 $(BUILD_DIR)/stage0_monitor.bin | $(BUILD_DIR)
+	{ cat $(BUILD_DIR)/stage0_monitor.hex0; printf '\x04'; cat $(BUILD_DIR)/echo.hex0; printf '\x04'; printf 'test\n'; } | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/stage0_monitor.bin > $@ 2>&1 || true
+
+$(BUILD_DIR)/hex0_prototype_echo.ok: $(BUILD_DIR)/hex0_prototype_echo.out
 	out=$$(grep -x '[tes]' $< | tr -d '\n'); [ "$$out" = test ]
 	touch $@
 
