@@ -3,9 +3,9 @@ CC := riscv64-none-elf-gcc
 OBJCOPY := riscv64-none-elf-objcopy
 
 ASFLAGS := -march=rv64i -mabi=lp64
-CFLAGS := -Os -march=rv64i -mabi=lp64 -mcmodel=medany -ffreestanding -fno-builtin -fno-stack-protector -fomit-frame-pointer -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident
+CFLAGS := -Oz -march=rv64i -mabi=lp64 -mcmodel=medany -ffreestanding -fno-builtin -fno-stack-protector -fomit-frame-pointer -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -ffunction-sections -fdata-sections
 C_ASMFLAGS := $(CFLAGS) -fverbose-asm
-LDFLAGS := -T baremetal.ld -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static
+LDFLAGS := -T baremetal.ld -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none -Wl,--strip-all
 
 QEMU_TIMEOUT := 1s
 
@@ -23,12 +23,13 @@ C_OBJS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.o)
 C_ELFS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.elf)
 C_BINS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.bin)
 C_ASMS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.s)
+HEX0_ASM := $(BUILD_DIR)/stage0_monitor.s
 
 .PHONY: all clean test_echo test_hex0 prototypes
 
 all: $(HEX0S)
 
-prototypes: $(C_BINS) $(C_ASMS)
+prototypes: $(C_BINS) $(C_ASMS) $(HEX0_ASM)
 
 $(BUILD_DIR):
 	mkdir -p $@
@@ -44,6 +45,9 @@ $(BUILD_DIR)/%.s: %.c
 	mkdir -p $(dir $@)
 	$(CC) $(C_ASMFLAGS) -S $< -o $@
 
+$(BUILD_DIR)/stage0_monitor.s: $(HEX0_C) | $(BUILD_DIR)
+	$(CC) $(C_ASMFLAGS) -S $< -o $@
+
 $(BUILD_DIR)/%.o: $(HEX0_C) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -53,11 +57,13 @@ $(BUILD_DIR)/%.elf: $(BUILD_DIR)/%.o baremetal.ld
 $(BUILD_DIR)/%.bin: $(BUILD_DIR)/%.elf
 	$(OBJCOPY) -O binary $< $@
 
+$(BUILD_DIR)/stage0_monitor.bin: $(BUILD_DIR)/stage0_monitor.s
+
 $(BUILD_DIR)/%.hex0: $(BUILD_DIR)/%.bin
 	xxd -p $< | tr -d '\n' > $@
 
 # This is meant to automate testing the hex binaries.
-test_hex0: $(BUILD_DIR)/echo.ok $(BUILD_DIR)/hex0_echo.ok
+test_hex0: $(BUILD_DIR)/echo.ok $(BUILD_DIR)/hex0_echo.ok $(HEX0_ASM)
 
 # Run only the echo test program.
 test_echo: $(BUILD_DIR)/echo.ok
