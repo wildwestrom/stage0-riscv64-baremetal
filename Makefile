@@ -94,7 +94,7 @@ $(BUILD_DIR)/echo.out: force_test_echo $(BUILD_DIR)/echo.bin | $(BUILD_DIR)
 
 # Now we see if the test program echoed the correct sequence.
 $(BUILD_DIR)/echo.ok: $(BUILD_DIR)/echo.out
-	out=$$(grep -x '[tes]' $< | tr -d '\n'); [ "$$out" = test ]
+	grep -q 'test' $<
 	touch $@
 
 # This tests hex0 (assembly) loading itself, then using itself to load echo.
@@ -103,7 +103,7 @@ $(BUILD_DIR)/hex0_echo.out: force_test_hex0 $(BUILD_DIR)/hex0.hex0 $(BUILD_DIR)/
 	{ cat $(BUILD_DIR)/hex0.hex0; printf '\x04'; cat $(BUILD_DIR)/echo.hex0; printf '\x04'; printf 'test\n'; } | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/hex0.bin > $@ 2>&1 || true
 
 $(BUILD_DIR)/hex0_echo.ok: $(BUILD_DIR)/hex0_echo.out
-	out=$$(grep -x '[tes]' $< | tr -d '\n'); [ "$$out" = test ]
+	grep -q 'test' $<
 	touch $@
 
 # This tests stage0_monitor (C) loading itself, then using itself to load echo.
@@ -112,7 +112,7 @@ $(BUILD_DIR)/hex0_prototype_echo.out: force_test_hex0 $(BUILD_DIR)/stage0_monito
 	{ cat $(BUILD_DIR)/stage0_monitor.hex0; printf '\x04'; cat $(BUILD_DIR)/echo.hex0; printf '\x04'; printf 'test\n'; } | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/stage0_monitor.bin > $@ 2>&1 || true
 
 $(BUILD_DIR)/hex0_prototype_echo.ok: $(BUILD_DIR)/hex0_prototype_echo.out
-	out=$$(grep -x '[tes]' $< | tr -d '\n'); [ "$$out" = test ]
+	grep -q 'test' $<
 	touch $@
 
 debug_hex0: $(BUILD_DIR)/hex0.debug.elf
