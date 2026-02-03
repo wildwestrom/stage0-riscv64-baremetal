@@ -6,6 +6,7 @@ ASFLAGS := -march=rv64i -mabi=lp64
 CFLAGS := -Oz -march=rv64i -mabi=lp64 -mcmodel=medany -ffreestanding -fno-builtin -fno-stack-protector -fomit-frame-pointer -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -ffunction-sections -fdata-sections
 C_ASMFLAGS := $(CFLAGS) -fverbose-asm
 LDFLAGS := -T baremetal.ld -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none -Wl,--strip-all
+LDFLAGS_DEBUG := -T baremetal.ld -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none
 
 QEMU_TIMEOUT := 1s
 
@@ -25,7 +26,7 @@ C_BINS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.bin)
 C_ASMS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.s)
 HEX0_ASM := $(BUILD_DIR)/stage0_monitor.s
 
-.PHONY: all clean test_echo test_hex0 prototypes
+.PHONY: all clean test_echo test_hex0 prototypes debug
 
 all: $(HEX0S)
 
@@ -53,6 +54,9 @@ $(BUILD_DIR)/%.o: $(HEX0_C) | $(BUILD_DIR)
 
 $(BUILD_DIR)/%.elf: $(BUILD_DIR)/%.o baremetal.ld
 	$(CC) $(LDFLAGS) $< -o $@
+
+$(BUILD_DIR)/%.debug.elf: $(BUILD_DIR)/%.o baremetal.ld
+	$(CC) $(LDFLAGS_DEBUG) $< -o $@
 
 $(BUILD_DIR)/%.bin: $(BUILD_DIR)/%.elf
 	$(OBJCOPY) -O binary $< $@
@@ -88,6 +92,11 @@ $(BUILD_DIR)/hex0_echo.out: $(BUILD_DIR)/echo.ok $(BUILD_DIR)/echo.hex0 $(BUILD_
 $(BUILD_DIR)/hex0_echo.ok: $(BUILD_DIR)/hex0_echo.out
 	out=$$(grep -x '[tes]' $< | tr -d '\n'); [ "$$out" = test ]
 	touch $@
+
+debug_hex0: $(BUILD_DIR)/hex0.debug.elf
+	rm -f qemu-dbg.in qemu-dbg.out
+	mkfifo qemu-dbg.in qemu-dbg.out
+	qemu-system-riscv64 -nographic -monitor none -serial pipe:qemu-dbg -machine virt -bios none -kernel $< -gdb tcp::1234
 
 clean:
 	rm -rf $(BUILD_DIR)

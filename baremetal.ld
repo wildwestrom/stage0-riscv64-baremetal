@@ -2,7 +2,7 @@ ENTRY(_start)
 SECTIONS
 {
     /* QEMU virt loads the kernel at this address by default. */
-    . = 0x80200000;
+    . = 0x80000000;
 
     /* Pack code + constants + data together to avoid padding between sections. */
     .text : ALIGN(4) {

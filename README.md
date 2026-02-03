@@ -6,9 +6,9 @@ I've been thinking about the bootstrapping problem.
 
 Let's assume that C (like assembly) is fundamentally unsound; Just take it as a premise. I understand exactly the historical context of why C is so entrenched. No need to rehash why C "won".
 
-We must start from somewhere in order to build up our systems, and indeed we can start pretty low, from machine code recorded as hexadecimal, constructed by cross-referencing a CPU architecture manual. The next stages then require that we go from inserting hexadecimal into hex0 into something that allows for a bit more control. The ability to calculate jump points so as to allow us to use aliases of where to jump. A few steps later and we have an assembler for the CPU. It's at this point we can then think about how to go from our particular CPU architecture to a compiler of a language for an abstract machine. In all cases, it is C. (One intermediate step is a scheme interpreter called `mes` written in C in order to make another C compiler.) There is no other bootstrappable toolchain where C is not an integral part. 
+We must start from somewhere in order to build up our systems, and indeed we can start pretty low, from machine code recorded as hexadecimal, constructed by cross-referencing a CPU architecture manual. The next stages then require that we go from inserting hexadecimal into hex0 into something that allows for a bit more control. The ability to calculate jump points so as to allow us to use aliases of where to jump. A few steps later and we have an assembler for the CPU. It's at this point we can then think about how to go from our particular CPU architecture to a compiler of a language for an abstract machine. In all cases, it is C. (One intermediate step is a scheme interpreter called `mes` written in C in order to make another C compiler.) There is no other bootstrappable toolchain where C is not an integral part.
 
-If we could create a toolchain without C, then what could we use instead of C? I could say the same about C++. To get to the latest versions of GCC and Clang (or Rust for that matter) we must bootstrap C++ from C. As we all know (or just accept it again) C++ is a mess. 
+If we could create a toolchain without C, then what could we use instead of C? I could say the same about C++. To get to the latest versions of GCC and Clang (or Rust for that matter) we must bootstrap C++ from C. As we all know (or just accept it again) C++ is a mess.
 
 My urge is to simplify the chain, or start a new chain, but this requires ignoring the flawed but existing and functioning work already done. It would require carving out a system incompatible in profound ways to everything else out there. No compatibility with any software written today (because it all relies on C somewhere in the chain). No compatibility with firmware interfaces (because of the C ABI). No ability to run on existing operating systems (C ABI/POSIX).
 
@@ -17,6 +17,7 @@ I would still say this is a worthwhile project though, and let's proceed as such
 Obviously we need some intermediate language(s).
 
 First something a little nicer than assembly (post `M0`) which I'll call Tier 1:
+
 - Forth: Trivial to implement in assembly, powerful, close to the hardware, completely foreign to me
 - LISP: Garbage collector, way more familiar to me (Clojure was my first language before Rust), probably not easy to access registers or memory
 - Something I don't know about.
@@ -25,6 +26,7 @@ First something a little nicer than assembly (post `M0`) which I'll call Tier 1:
 I could easily just steal or port an existing Tier 1, but I'd still have to then use that for the next step.
 
 Then something nicer than that but still simple and powerful. All of these currently rely on C as part of their bootstrap process. Tier 2.
+
 - Oberon: small spec, similar to C semantically, used to implement a whole OS
 - LISP: same problems as other lisps, possibly could be stack-based if implemented in Forth
 - Standard ML: great type system, probably very hard to implement
@@ -39,3 +41,33 @@ People have a vested interest in their software being safe and correct. We alrea
 ## Where we're at
 
 Seems like without any runtime. I can output "hello" to the serial console on "bare metal" using RISC-V assembly only.
+
+## Debugging
+
+I managed to get debugging to work. You'll need a few terminals open.
+
+Terminal 1 is going to have qemu running:
+
+```sh
+make debug_hex0
+```
+
+After that open Terminal 2 and run gdb:
+The `.gdbinit` file should set everything up.
+
+```sh
+gdb
+```
+
+Then in Terminal 3, set up something to watch our pipe `qemu-dbg.out`.
+I use bat.
+
+```sh
+bat -p --paging=never qemu-dbg.out
+```
+
+In terminal 4 we'll send our text.
+
+```sh
+echo 'test text' >> qemu-dbg.in
+```
