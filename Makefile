@@ -8,7 +8,7 @@ C_ASMFLAGS := $(CFLAGS) -fverbose-asm
 LDFLAGS := -T baremetal.ld -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none -Wl,--strip-all
 LDFLAGS_DEBUG := -T baremetal.ld -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none
 
-QEMU_TIMEOUT := 1s
+QEMU_TIMEOUT := 0.1s
 
 BUILD_DIR := build
 SOURCES := echo.s
@@ -26,7 +26,7 @@ C_BINS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.bin)
 C_ASMS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.s)
 HEX0_ASM := $(BUILD_DIR)/stage0_monitor.s
 
-.PHONY: all clean test_echo test_hex0 prototypes debug
+.PHONY: all clean test_echo test_hex0 prototypes debug force_test_echo force_test_hex0
 
 all: $(HEX0S)
 
@@ -63,6 +63,12 @@ $(BUILD_DIR)/%.bin: $(BUILD_DIR)/%.elf
 
 $(BUILD_DIR)/stage0_monitor.bin: $(BUILD_DIR)/stage0_monitor.s
 
+$(BUILD_DIR)/hex0.o: stage0/hex0.s | $(BUILD_DIR)
+	$(AS) $(ASFLAGS) $< -o $@
+
+$(BUILD_DIR)/hex0.elf: $(BUILD_DIR)/hex0.o baremetal.ld
+	$(CC) $(LDFLAGS) $< -o $@
+
 $(BUILD_DIR)/%.hex0: $(BUILD_DIR)/%.bin
 	xxd -p $< | tr -d '\n' > $@
 
@@ -73,22 +79,19 @@ test_hex0: $(BUILD_DIR)/echo.ok $(BUILD_DIR)/hex0_echo.ok $(HEX0_ASM)
 test_echo: $(BUILD_DIR)/echo.ok
 
 # This tests the echo program which is just supposed to echo each character back with a newline.
-$(BUILD_DIR)/echo.out: $(BUILD_DIR)/echo.bin | $(BUILD_DIR)
-	{ sleep 0.5; printf 'test'; } | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/echo.bin > $@ 2>&1 || true
+$(BUILD_DIR)/echo.out: force_test_echo $(BUILD_DIR)/echo.bin | $(BUILD_DIR)
+	printf 'test' | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/echo.bin > $@ 2>&1 || true
 
 # Now we see if the test program echoed the correct sequence.
 $(BUILD_DIR)/echo.ok: $(BUILD_DIR)/echo.out
 	out=$$(grep -x '[tes]' $< | tr -d '\n'); [ "$$out" = test ]
 	touch $@
 
-# This is more complicated.
-# From the previous test above, we know that the test program is working.
-# This test tests the test program via hex0, ensuring that hex0 is working.
-$(BUILD_DIR)/hex0_echo.out: $(BUILD_DIR)/echo.ok $(BUILD_DIR)/echo.hex0 $(BUILD_DIR)/stage0_monitor.bin | $(BUILD_DIR)
-# There's a race condition where qemu might not be ready to read input, so we sleep.
-	{ sleep 0.5; cat $(BUILD_DIR)/echo.hex0; printf '\x04'; printf 'test\n'; } | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/stage0_monitor.bin > $@ 2>&1 || true
+# This tests hex0 loading itself, then using itself to load echo.
+# This verifies that hex0 can bootstrap itself and then load other programs.
+$(BUILD_DIR)/hex0_echo.out: force_test_hex0 $(BUILD_DIR)/stage0_monitor.hex0 $(BUILD_DIR)/echo.hex0 $(BUILD_DIR)/stage0_monitor.bin | $(BUILD_DIR)
+	{ cat $(BUILD_DIR)/stage0_monitor.hex0; printf '\x04'; cat $(BUILD_DIR)/echo.hex0; printf '\x04'; printf 'test\n'; } | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/stage0_monitor.bin > $@ 2>&1 || true
 
-# We should get the exact same result as the previous test.
 $(BUILD_DIR)/hex0_echo.ok: $(BUILD_DIR)/hex0_echo.out
 	out=$$(grep -x '[tes]' $< | tr -d '\n'); [ "$$out" = test ]
 	touch $@
