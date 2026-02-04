@@ -1,5 +1,7 @@
 # Bootstrapping without C
 
+What is this? It's basically [`stage0`](https://github.com/oriansj/stage0) but for RISC-V on baremetal, and with no plans to get GCC up and running. I made heavy use of LLMs in doing this and I'm not proud. Yes, I understand that "root of trust" is the very problem `stage0` is trying to solve, but I really don't care enough to audit machine code seeds myself.
+
 ## The problem
 
 I've been thinking about the bootstrapping problem.
@@ -40,7 +42,7 @@ People have a vested interest in their software being safe and correct. We alrea
 
 ## Where we're at
 
-Seems like without any runtime. I can output "hello" to the serial console on "bare metal" using RISC-V assembly only.
+The project now has a test suite that verifies the hex monitor can indeed take input and execute it. The way I test this is with a small bit of assembly that echoes in and out of the serial console via UART. 
 
 ## Debugging
 
