@@ -2,6 +2,13 @@
 
 What is this? It's basically [`stage0`](https://github.com/oriansj/stage0) but for RISC-V on baremetal, and with no plans to get GCC up and running. I made heavy use of LLMs in doing this and I'm not proud. Yes, I understand that "root of trust" is the very problem `stage0` is trying to solve, but I really don't care enough to audit machine code seeds myself.
 
+## Relevant Links
+
+https://bootstrappable.org/
+https://reproducible-builds.org/
+https://github.com/oriansj/stage0
+https://github.com/fosslinux/live-bootstrap
+
 ## The problem
 
 I've been thinking about the bootstrapping problem.
