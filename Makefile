@@ -9,16 +9,11 @@ LDFLAGS := -Ttext=0x80000000 -e _start -march=rv64i -mabi=lp64 -mcmodel=medany -
 LDFLAGS_DEBUG := -Ttext=0x80000000 -e _start -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none
 
 QEMU_TIMEOUT := 0.1s
+QEMU_TIMEOUT_LONG := 0.5s
 
 BUILD_DIR := build
-SOURCES := echo.s
 HEX0_C := baremetal/high_level_prototype/stage0_monitor.c
 C_SOURCES :=
-
-OBJS := $(SOURCES:%.s=$(BUILD_DIR)/%.o)
-ELFS := $(SOURCES:%.s=$(BUILD_DIR)/%.elf)
-BINS := $(SOURCES:%.s=$(BUILD_DIR)/%.bin)
-HEX0S := $(SOURCES:%.s=$(BUILD_DIR)/%.hex0)
 
 C_OBJS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.o)
 C_ELFS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.elf)
@@ -26,9 +21,9 @@ C_BINS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.bin)
 C_ASMS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.s)
 HEX0_ASM := $(BUILD_DIR)/stage0_monitor.s
 
-.PHONY: all clean test_echo test_hex0 test_hex0_handwritten test_hex0_prototype prototypes debug force_test_echo force_test_hex0 verify_hex0
+.PHONY: all clean test_echo test_hex0 test_hex0_handwritten test_hex0_prototype test_hex1 prototypes debug force_test_echo force_test_hex0 force_test_hex1 verify_hex0
 
-all: $(HEX0S)
+all: $(BUILD_DIR)/echo.bin $(BUILD_DIR)/hex0.bin
 
 prototypes: $(C_BINS) $(C_ASMS) $(HEX0_ASM)
 
@@ -70,6 +65,13 @@ $(BUILD_DIR)/stage0_monitor.elf: $(BUILD_DIR)/stage0_monitor.o baremetal/high_le
 $(BUILD_DIR)/stage0_monitor.debug.elf: $(BUILD_DIR)/stage0_monitor.o baremetal/high_level_prototype/stage0_monitor.ld
 	$(CC) -T baremetal/high_level_prototype/stage0_monitor.ld -e _start -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none $< -o $@
 
+# Build echo from hex0
+$(BUILD_DIR)/echo.bin: uart_echo/echo.hex0 hex0_to_bin.sh | $(BUILD_DIR)
+	./hex0_to_bin.sh $< $@
+
+$(BUILD_DIR)/echo.hex0: uart_echo/echo.hex0 | $(BUILD_DIR)
+	cp $< $@
+
 # Build hex0 from assembly (for comparison/debugging)
 $(BUILD_DIR)/hex0.o: baremetal/GAS/hex0.s | $(BUILD_DIR)
 	$(AS) $(ASFLAGS) $< -o $@
@@ -80,6 +82,17 @@ $(BUILD_DIR)/hex0.elf: $(BUILD_DIR)/hex0.o
 # Build hex0 from hand-written hex0.hex0 using our converter script
 $(BUILD_DIR)/hex0_handwritten.bin: baremetal/hex0.hex0 hex0_to_bin.sh | $(BUILD_DIR)
 	./hex0_to_bin.sh $< $@
+
+# Build hex1 from assembly
+$(BUILD_DIR)/hex1.o: baremetal/GAS/hex1.s | $(BUILD_DIR)
+	$(AS) $(ASFLAGS) $< -o $@
+
+$(BUILD_DIR)/hex1.elf: $(BUILD_DIR)/hex1.o
+	$(CC) $(LDFLAGS) $< -o $@
+
+# Build hex1 from hex1.hex0 using hex0 (assembled from .s)
+$(BUILD_DIR)/hex1_from_hex0.bin: baremetal/hex1.hex0 $(BUILD_DIR)/hex0.bin | $(BUILD_DIR)
+	{ cat $<; printf '\x04'; } | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/hex0.bin 2>/dev/null | tail -c +1 > $@
 
 # Verify that hex0.hex0 produces identical binary to assembly-generated hex0.bin
 verify_hex0: $(BUILD_DIR)/hex0.bin $(BUILD_DIR)/hex0_handwritten.bin
@@ -134,6 +147,19 @@ $(BUILD_DIR)/hex0_prototype_echo.out: force_test_hex0 $(BUILD_DIR)/stage0_monito
 $(BUILD_DIR)/hex0_prototype_echo.ok: $(BUILD_DIR)/hex0_prototype_echo.out
 	grep -q 'test' $<
 	touch $@
+
+# Test hex1: hex0.bin loads hex0.hex0, which loads hex1.hex0, which loads echo.hex1
+test_hex1: $(BUILD_DIR)/hex1_echo.ok
+
+$(BUILD_DIR)/hex1_echo.out: force_test_hex1 $(BUILD_DIR)/hex0.hex0 $(BUILD_DIR)/hex1.hex0 uart_echo/echo.hex1 $(BUILD_DIR)/hex0.bin | $(BUILD_DIR)
+	(cat $(BUILD_DIR)/hex0.hex0; printf '\x04'; cat $(BUILD_DIR)/hex1.hex0; printf '\x04'; cat uart_echo/echo.hex1; printf '\x04'; printf 'test\n') | timeout $(QEMU_TIMEOUT_LONG) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/hex0.bin > $@ 2>&1 || true
+
+$(BUILD_DIR)/hex1_echo.ok: $(BUILD_DIR)/hex1_echo.out
+	grep -q 'test' $<
+	touch $@
+
+force_test_hex1:
+	rm -f $(BUILD_DIR)/hex1_echo.out $(BUILD_DIR)/hex1_echo.ok
 
 debug_hex0: $(BUILD_DIR)/hex0.debug.elf
 	rm -f qemu-dbg.in qemu-dbg.out

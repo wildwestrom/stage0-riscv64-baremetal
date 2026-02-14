@@ -26,10 +26,10 @@
 # _start:
 	# Setup stack pointer
 	17 31 00 00       # auipc sp, 0x3
-	13 01 01 18       # addi sp, sp, 0x180
+	13 01 01 19       # addi sp, sp, 0x190
 	# Setup code buffer pointer
 	17 19 00 00       # auipc s2, 0x1
-	13 09 89 17       # addi s2, s2, 0x178
+	13 09 89 18       # addi s2, s2, 0x188
 	# Initialize toggle and holder
 	93 04 10 00       # addi s1, x0, 0x1
 	13 04 00 00       # addi s0, x0, 0
@@ -39,7 +39,7 @@
 	# Check for Ctrl-D
 	93 02 40 00       # addi t0, x0, 4
 	63 16 55 00       # bne a0, t0, process_input
-	EF 00 00 0E       # jal ra, execute_code
+	EF 00 80 0E       # jal ra, execute_code
 	6F F0 1F FF       # jal x0, loop
 
 # process_input:
@@ -64,7 +64,6 @@
 
 # read_char:
 	B7 02 00 10       # lui t0, 0x10000
-  # This is the only 64 bit instruction so far
 	9B 82 52 00       # addiw t0, t0, 5
 # poll_rx:
 	03 85 02 00       # lb a0, 0(t0)
@@ -121,15 +120,19 @@
 # ascii_comment:
 	13 01 01 FF       # addi sp, sp, -16
 	23 30 11 00       # sd ra, 0(sp)
+# ascii_comment_loop:
 	EF F0 5F F7       # jal ra, read_char
 	93 02 D0 00       # addi t0, x0, 0xD
-	E3 18 55 FE       # bne a0, t0, ascii_comment
+	63 06 55 00       # beq a0, t0, ascii_comment_done
+	93 02 A0 00       # addi t0, x0, 0xA
+	E3 18 55 FE       # bne a0, t0, ascii_comment_loop
+# ascii_comment_done:
 	83 30 01 00       # ld ra, 0(sp)
 	13 01 01 01       # addi sp, sp, 16
-	6F F0 DF FD       # jal x0, ascii_other
+	6F F0 5F FD       # jal x0, ascii_other
 
 # execute_code:
-	# Zero all registers before jump (except sp and code location)
+# Zero all registers before jump (except sp and code location)
 	13 05 00 00       # addi a0, x0, 0
 	93 05 00 00       # addi a1, x0, 0
 	13 06 00 00       # addi a2, x0, 0
@@ -147,7 +150,7 @@
 	93 0F 00 00       # addi t6, x0, 0
 	13 04 00 00       # addi s0, x0, 0
 	93 04 00 00       # addi s1, x0, 0
-  # s2 already points to CODE_BASE, keep it
+# s2 already points to CODE_BASE, keep it
 	93 09 00 00       # addi s3, x0, 0
 	13 0A 00 00       # addi s4, x0, 0
 	93 0A 00 00       # addi s5, x0, 0
@@ -157,9 +160,9 @@
 	93 0C 00 00       # addi s9, x0, 0
 	13 0D 00 00       # addi s10, x0, 0
 	93 0D 00 00       # addi s11, x0, 0
-	# Load the code that we input by hand
+# Load the code that we input by hand
 	97 12 00 00       # auipc t0, 0x1
-	93 82 42 01       # addi t0, t0, 20
+	93 82 C2 01       # addi t0, t0, 0x1C
 	67 80 02 00       # jalr x0, t0, 0
 
 # done:

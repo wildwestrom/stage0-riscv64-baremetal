@@ -135,9 +135,13 @@ ascii_other:
 ascii_comment:
     addi sp, sp, -16
     sd ra, 0(sp)
+ascii_comment_loop:
     call read_char
-    li t0, 13
-    bne a0, t0, ascii_comment
+    li t0, 13              # check for \r
+    beq a0, t0, ascii_comment_done
+    li t0, 10              # check for \n
+    bne a0, t0, ascii_comment_loop
+ascii_comment_done:
     ld ra, 0(sp)
     addi sp, sp, 16
     j ascii_other

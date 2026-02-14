@@ -1,0 +1,46 @@
+## Copyright (C) 2026 Christian Westrom
+## This file is part of stage0.
+##
+## stage0 is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## stage0 is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with stage0.  If not, see <http://www.gnu.org/licenses/>.
+
+# Literally all this does is echo characters over UART.
+
+# :_start
+	# Set up the stack (sp = 0x80002220)
+	37 01 04 00     # lui sp, 0x40              ; Load value with bit 31 clear           | 0x00040000
+	1b 01 11 00     # addiw sp, sp, 1           ; Set up the bit pattern (bits 18 and 0) | 0x00040001
+	13 11 d1 00     # slli sp, sp, 0xD          ; Shift the bits up                      | 0x8000200
+	13 01 01 22     # addi sp, sp, 0x220        ; Add remaining low bits                 | 0x80002220
+	# UART base address (a1 = 0x10000000)
+  b7 05 00 10     # lui a1, 0x10000
+	# LSR address (a2 = 0x10000005)
+	37 06 00 10     # lui a2, 0x10000
+	1b 06 56 00     # addiw a2, a2, 5
+
+# :echo_loop
+	# Poll LSR bit 0 (Data Ready)
+	03 05 06 00     # lb a0, 0(a2)
+	13 75 15 00     # andi a0, a0, 1
+	e3 0c 05 fe     # beq a0, x0, (-8)          ; If no data ready, loop back
+	03 85 05 00     # lb a0, 0(a1)              ; Data is ready, read from RBR (same as base)
+
+# :wait_tx
+	# Wait for TX ready (bit 5 of LSR)
+	83 06 06 00     # lb a3, 0(a2)
+	93 f6 06 02     # andi a3, a3, 0x20         ; Mask bit 5
+	e3 8c 06 fe     # beq a3, x0, wait_tx (-8)  ; If TX not ready, wait
+	# Echo the character back
+	23 80 a5 00     # sb a0, 0(a1)
+	# Continue loop
+	6f f0 1f fe     # jal x0, echo_loop (-32)
