@@ -12,7 +12,7 @@ QEMU_TIMEOUT := 0.1s
 
 BUILD_DIR := build
 SOURCES := echo.s
-HEX0_C := stage0/high_level_prototype/stage0_monitor.c
+HEX0_C := baremetal/high_level_prototype/stage0_monitor.c
 C_SOURCES :=
 
 OBJS := $(SOURCES:%.s=$(BUILD_DIR)/%.o)
@@ -64,21 +64,21 @@ $(BUILD_DIR)/%.bin: $(BUILD_DIR)/%.elf
 $(BUILD_DIR)/stage0_monitor.bin: $(BUILD_DIR)/stage0_monitor.s
 
 # Special rule for stage0_monitor to use linker script that ensures _start comes first
-$(BUILD_DIR)/stage0_monitor.elf: $(BUILD_DIR)/stage0_monitor.o stage0/high_level_prototype/stage0_monitor.ld
-	$(CC) -T stage0/high_level_prototype/stage0_monitor.ld -e _start -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none -Wl,--strip-all $< -o $@
+$(BUILD_DIR)/stage0_monitor.elf: $(BUILD_DIR)/stage0_monitor.o baremetal/high_level_prototype/stage0_monitor.ld
+	$(CC) -T baremetal/high_level_prototype/stage0_monitor.ld -e _start -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none -Wl,--strip-all $< -o $@
 
-$(BUILD_DIR)/stage0_monitor.debug.elf: $(BUILD_DIR)/stage0_monitor.o stage0/high_level_prototype/stage0_monitor.ld
-	$(CC) -T stage0/high_level_prototype/stage0_monitor.ld -e _start -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none $< -o $@
+$(BUILD_DIR)/stage0_monitor.debug.elf: $(BUILD_DIR)/stage0_monitor.o baremetal/high_level_prototype/stage0_monitor.ld
+	$(CC) -T baremetal/high_level_prototype/stage0_monitor.ld -e _start -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none $< -o $@
 
 # Build hex0 from assembly (for comparison/debugging)
-$(BUILD_DIR)/hex0.o: stage0/hex0.s | $(BUILD_DIR)
+$(BUILD_DIR)/hex0.o: baremetal/GAS/hex0.s | $(BUILD_DIR)
 	$(AS) $(ASFLAGS) $< -o $@
 
 $(BUILD_DIR)/hex0.elf: $(BUILD_DIR)/hex0.o
 	$(CC) $(LDFLAGS) $< -o $@
 
 # Build hex0 from hand-written hex0.hex0 using our converter script
-$(BUILD_DIR)/hex0_handwritten.bin: stage0/hex0.hex0 hex0_to_bin.sh | $(BUILD_DIR)
+$(BUILD_DIR)/hex0_handwritten.bin: baremetal/hex0.hex0 hex0_to_bin.sh | $(BUILD_DIR)
 	./hex0_to_bin.sh $< $@
 
 # Verify that hex0.hex0 produces identical binary to assembly-generated hex0.bin

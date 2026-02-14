@@ -26,12 +26,12 @@
 # _start:
 	# Setup stack pointer
 	17 31 00 00       # auipc sp, 0x3
-	13 01 01 18       # addi sp, sp, 384
+	13 01 01 18       # addi sp, sp, 0x180
 	# Setup code buffer pointer
 	17 19 00 00       # auipc s2, 0x1
-	13 09 89 17       # addi s2, s2, 376
+	13 09 89 17       # addi s2, s2, 0x178
 	# Initialize toggle and holder
-	93 04 10 00       # addi s1, x0, 1
+	93 04 10 00       # addi s1, x0, 0x1
 	13 04 00 00       # addi s0, x0, 0
 
 # loop:
@@ -64,6 +64,7 @@
 
 # read_char:
 	B7 02 00 10       # lui t0, 0x10000
+  # This is the only 64 bit instruction so far
 	9B 82 52 00       # addiw t0, t0, 5
 # poll_rx:
 	03 85 02 00       # lb a0, 0(t0)
@@ -128,7 +129,7 @@
 	6F F0 DF FD       # jal x0, ascii_other
 
 # execute_code:
-	# Zero all registers before jump
+	# Zero all registers before jump (except sp and code location)
 	13 05 00 00       # addi a0, x0, 0
 	93 05 00 00       # addi a1, x0, 0
 	13 06 00 00       # addi a2, x0, 0
@@ -146,6 +147,7 @@
 	93 0F 00 00       # addi t6, x0, 0
 	13 04 00 00       # addi s0, x0, 0
 	93 04 00 00       # addi s1, x0, 0
+  # s2 already points to CODE_BASE, keep it
 	93 09 00 00       # addi s3, x0, 0
 	13 0A 00 00       # addi s4, x0, 0
 	93 0A 00 00       # addi s5, x0, 0
