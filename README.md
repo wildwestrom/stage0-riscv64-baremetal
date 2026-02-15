@@ -27,8 +27,9 @@ Obviously we need some intermediate language(s).
 
 First something a little nicer than assembly (post `M0`) which I'll call Tier 1:
 
-- Forth: Trivial to implement in assembly, powerful, close to the hardware, completely foreign to me
 - LISP: Garbage collector, way more familiar to me (Clojure was my first language before Rust), probably not easy to access registers or memory
+- Forth: Supposedly trivial to implement in assembly, powerful, close to the hardware, but from what I saw, it's less readable than assembly. Not to mention the stack juggling I'll have to do in my head.
+- Oberon: small spec, similar to C semantically, used to implement a whole OS, but possibly too early in the toolchain
 - Something I don't know about.
 - Something completely new: I'm nowhere near an expert that can design and implement a language in assembly.
 
@@ -36,12 +37,14 @@ I could easily just steal or port an existing Tier 1, but I'd still have to then
 
 Then something nicer than that but still simple and powerful. All of these currently rely on C as part of their bootstrap process. Tier 2.
 
-- Oberon: small spec, similar to C semantically, used to implement a whole OS
-- LISP: same problems as other lisps, possibly could be stack-based if implemented in Forth
+- Oberon: for the reasons above, probably a good choice
+- LISP: same problems as other lisps
 - Standard ML: great type system, probably very hard to implement
 - Something else I don't know about.
 - Something completely new: I don't really want to design my own language at this stage.
 - C???: No...
+
+For all I know, I'll need many more steps in between, but hopefully nowhere close to the roughly 80 steps it takes to get to GCC in [`live-bootstrap`](https://github.com/fosslinux/live-bootstrap/blob/master/parts.rst).
 
 Why wouldn't I accept an intermediate C (`cc_x86`, `M2 Planet`, `mescc`, `tinycc`)? Because, it begs the question of why undertake this project at all? Why not just compress some of the existing bootstrap process with more C? Again, this is because you would then leak C's ill-defined semantics everywhere up the chain. We're trying to build new foundations.
 
@@ -49,7 +52,7 @@ People have a vested interest in their software being safe and correct. We alrea
 
 ## Where we're at
 
-The bootstrap chain is functional through hex1:
+The bootstrap chain is functional through `hex1`:
 
 - **hex0**: Minimal hex loader - reads hex bytes from UART, stores in memory, executes on Ctrl-D
 - **hex1**: hex0 + single-character labels (`:x` to define, `@x` for B-format branches, `$x` for J-format jumps, `~x` for U-format upper immediate, `!x` for I-format lower immediate)
