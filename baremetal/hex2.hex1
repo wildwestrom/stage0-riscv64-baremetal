@@ -1,0 +1,959 @@
+## Copyright (C) 2026 Christian Westrom
+## This file is part of stage0.
+##
+## stage0 is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## stage0 is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with stage0.  If not, see <http://www.gnu.org/licenses/>.
+
+
+# hex2 - A two-pass hex assembler for RISC-V (bare metal, QEMU virt)
+#
+# This is adapted from stage0-posix hex2_riscv64.S for bare metal operation.
+# Instead of file I/O syscalls, it reads input from UART into a memory buffer,
+# processes it in two passes, writes output to a memory buffer, then jumps to
+# the output buffer to execute the assembled code.
+#
+# Supports:
+#   - Hex bytes (pairs of hex digits)
+#   - Labels (:x) and references (@x for B-format, $x for J-format,
+#     !x for I-format, ~x for U-format)
+#   - Relative pointers (%label, &label, %label>label)
+#   - Word literals (.XXXXXXXX for 4-byte little-endian values)
+#   - Alignment padding (<)
+#   - Comments (# or ;)
+
+; Register use:
+; s1: jump table (linked list head)
+; s2: input buffer current position
+; s3: input buffer start (for rewinding)
+; s4: toggle
+; s5: hold
+; s6: ip
+; s7: tempword
+; s8: shiftregister
+; s9: malloc pointer (heap)
+; s10: updates
+; s11: input buffer end
+
+# Struct format: (size 24)
+# next => 0                      # Next element in linked list
+# target => 8                    # Target (ip)
+# name => 16                     # Label name
+
+# Memory layout at 0x80100000:
+#   heap:         0x80100000 (256KB = 0x40000) - for label structs and names
+#   input_buffer: 0x80140000 (256KB = 0x40000)
+#   output_buffer:0x80180000 (256KB = 0x40000)
+#   scratch:      0x801C0000 (4KB   = 0x1000)
+#   stack_top:    0x801C2000
+
+
+# _start:
+	# Set up stack pointer (sp = 0x801C2000)
+	37 01 04 00       # lui sp, 0x40
+	1b 01 11 0e       # addiw sp, sp, 225             ; 0x400e1
+	13 11 d1 00       # slli sp, sp, 0xd              ; 0x801C2000
+
+	# Set up malloc pointer (s9 = 0x80100000)
+	b7 1c 00 00       # lui s9, 0x1
+	9b 8c 1c 80       # addiw s9, s9, -2047           ; 0x801
+	93 9c 4c 01       # slli s9, s9, 0x14             ; 0x80100000
+
+	# Set up input buffer pointer (s2 = s3 = 0x80140000)
+	37 29 00 00       # lui s2, 0x2
+	1b 09 59 00       # addiw s2, s2, 5               ; 0x2005
+	13 19 29 01       # slli s2, s2, 0x12             ; 0x80140000
+	93 09 09 00       # addi s3, s2, 0                ; s3 = s2 (save start)
+
+
+# read_input_loop:
+# Read input from UART into memory buffer until Ctrl-D
+:A
+	$y ef 00 00 00    # jal ra, read_char             ; Read char from UART
+	93 02 40 00       # addi t0, x0, 4                ; t0 = 4 (Ctrl-D)
+	@B 63 00 55 00    # beq a0, t0, read_input_done   ; If Ctrl-D, done reading
+	23 00 a9 00       # sb a0, 0(s2)                  ; Store byte in input buffer
+	13 09 19 00       # addi s2, s2, 1                ; Increment buffer pointer
+	$A 6f 00 00 00    # jal x0, read_input_loop       ; Continue reading
+
+
+# read_input_done:
+# Save end position and reset for processing
+:B
+	93 0d 09 00       # addi s11, s2, 0               ; s11 = end of input
+	13 89 09 00       # addi s2, s3, 0                ; s2 = start of input (rewind)
+
+	# Initialize globals for first pass
+	13 0a f0 ff       # addi s4, x0, -1               ; toggle = -1 (true)
+	93 0a 00 00       # addi s5, x0, 0                ; hold = 0
+	13 0b 00 00       # addi s6, x0, 0                ; ip = 0
+
+	$d ef 00 00 00    # jal ra, ClearScratch          ; Zero the scratch area
+	$C ef 00 00 00    # jal ra, First_pass            ; Run first pass
+
+	# Rewind input and reset globals for second pass
+	13 89 09 00       # addi s2, s3, 0                ; s2 = start of input (rewind)
+	13 0a f0 ff       # addi s4, x0, -1               ; toggle = -1 (true)
+	93 0a 00 00       # addi s5, x0, 0                ; hold = 0
+	13 0b 00 00       # addi s6, x0, 0                ; ip = 0
+	93 0b 00 00       # addi s7, x0, 0                ; tempword = 0
+	13 0c 00 00       # addi s8, x0, 0                ; shiftregister = 0
+
+	$J ef 00 00 00    # jal ra, Second_pass           ; Run second pass
+
+	# Jump to output buffer to execute assembled code (0x80180000)
+	b7 12 00 00       # lui t0, 0x1
+	9b 82 32 00       # addiw t0, t0, 3               ; 0x1003
+	93 92 32 01       # slli t0, t0, 0x13             ; 0x80180000
+	67 80 02 00       # jalr x0, t0, 0                ; Jump to output
+
+
+# =====================================================================
+# First_pass:
+# Scan input to find all labels and calculate their addresses.
+# Does not output anything, just builds the symbol table.
+# =====================================================================
+:C
+	13 01 81 ff       # addi sp, sp, -8               ; Allocate stack
+	23 30 11 00       # sd ra, 0(sp)                  ; Save return address
+
+
+# First_pass_loop:
+:D
+	@I 63 50 b9 01    # bge s2, s11, First_pass_done  ; If at end of input, done
+	$x ef 00 00 00    # jal ra, Read_byte             ; Read next byte
+
+	# Check for ':' (0x3A) - label definition
+	13 03 a0 03       # addi t1, x0, 0x3a             ; t1 = ':'
+	@5 63 00 65 00    # beq a0, t1, StoreLabel        ; Store label
+
+	# Check for '.' (0x2E) - word literal
+	13 03 e0 02       # addi t1, x0, 0x2e             ; t1 = '.'
+	@G 63 00 65 00    # beq a0, t1, First_pass_UpdateWord
+
+	# Check for '%' (0x25) - relative pointer
+	13 03 50 02       # addi t1, x0, 0x25             ; t1 = '%'
+	@F 63 00 65 00    # beq a0, t1, First_pass_pointer
+
+	# Check for '&' (0x26) - absolute pointer
+	13 03 60 02       # addi t1, x0, 0x26             ; t1 = '&'
+	@F 63 00 65 00    # beq a0, t1, First_pass_pointer
+
+	# Check for '!' (0x21) - I-format displacement
+	13 03 10 02       # addi t1, x0, 0x21             ; t1 = '!'
+	@E 63 00 65 00    # beq a0, t1, Throwaway_token
+
+	# Check for '@' (0x40) - B-format displacement
+	13 03 00 04       # addi t1, x0, 0x40             ; t1 = '@'
+	@E 63 00 65 00    # beq a0, t1, Throwaway_token
+
+	# Check for '$' (0x24) - J-format displacement
+	13 03 40 02       # addi t1, x0, 0x24             ; t1 = '$'
+	@E 63 00 65 00    # beq a0, t1, Throwaway_token
+
+	# Check for '~' (0x7E) - U-format displacement
+	13 03 e0 07       # addi t1, x0, 0x7e             ; t1 = '~'
+	@E 63 00 65 00    # beq a0, t1, Throwaway_token
+
+	# Check for '<' (0x3C) - alignment padding
+	13 03 c0 03       # addi t1, x0, 0x3c             ; t1 = '<'
+	93 05 f0 ff       # addi a1, x0, -1               ; write = false
+	@a 63 00 65 00    # beq a0, t1, PadToAlign
+
+	# Handle everything else (hex digits, whitespace, comments)
+	93 05 f0 ff       # addi a1, x0, -1               ; write = false
+	13 06 f0 ff       # addi a2, x0, -1               ; update = false
+	$i ef 00 00 00    # jal ra, DoByte                ; Process the byte
+	$D 6f 00 00 00    # jal x0, First_pass_loop       ; Continue loop
+
+
+# Throwaway_token:
+# Read and discard label token (for @, $, !, ~)
+:E
+	b7 25 00 00       # lui a1, 0x2
+	9b 85 75 00       # addiw a1, a1, 7               ; 0x2007
+	93 95 25 01       # slli a1, a1, 0x12             ; a1 = 0x801C0000 (scratch)
+	$f ef 00 00 00    # jal ra, consume_token         ; Read token into scratch
+	$d ef 00 00 00    # jal ra, ClearScratch          ; Clear scratch
+	$D 6f 00 00 00    # jal x0, First_pass_loop       ; Continue loop
+
+
+# First_pass_pointer:
+# Handle % and & pointer references (4 bytes each)
+:F
+	13 0b 4b 00       # addi s6, s6, 4                ; ip += 4
+	b7 25 00 00       # lui a1, 0x2
+	9b 85 75 00       # addiw a1, a1, 7               ; 0x2007
+	93 95 25 01       # slli a1, a1, 0x12             ; a1 = 0x801C0000 (scratch)
+	$f ef 00 00 00    # jal ra, consume_token         ; Read first token
+	$d ef 00 00 00    # jal ra, ClearScratch          ; Clear scratch
+
+	# Check for '>' (0x3E) - %label>label case
+	13 03 e0 03       # addi t1, x0, 0x3e             ; t1 = '>'
+	@D 63 10 65 00    # bne a0, t1, First_pass_loop   ; If not '>', continue
+
+	# Handle second label in %label>label
+	b7 25 00 00       # lui a1, 0x2
+	9b 85 75 00       # addiw a1, a1, 7               ; 0x2007
+	93 95 25 01       # slli a1, a1, 0x12             ; a1 = 0x801C0000 (scratch)
+	$f ef 00 00 00    # jal ra, consume_token         ; Read second token
+	$d ef 00 00 00    # jal ra, ClearScratch          ; Clear scratch
+	$D 6f 00 00 00    # jal x0, First_pass_loop       ; Continue loop
+
+
+# First_pass_UpdateWord:
+# Handle '.' word literal - read 4 hex bytes
+:G
+	13 0d 00 00       # addi s10, x0, 0               ; updates = 0
+	93 0b 00 00       # addi s7, x0, 0                ; tempword = 0
+	93 07 40 00       # addi a5, x0, 4                ; a5 = 4 (loop counter)
+
+# First_pass_UpdateWord_loop:
+:H
+	$x ef 00 00 00    # jal ra, Read_byte             ; Read next byte
+	93 05 f0 ff       # addi a1, x0, -1               ; write = false
+	13 06 00 00       # addi a2, x0, 0                ; update = true
+	$i ef 00 00 00    # jal ra, DoByte                ; Process byte
+	@H 63 40 fd 00    # blt s10, a5, First_pass_UpdateWord_loop ; Loop 4 times
+	13 0b cb ff       # addi s6, s6, -4               ; ip -= 4 (undo DoByte increments)
+	$D 6f 00 00 00    # jal x0, First_pass_loop       ; Continue loop
+
+
+# First_pass_done:
+:I
+	83 30 01 00       # ld ra, 0(sp)                  ; Restore return address
+	13 01 81 00       # addi sp, sp, 8                ; Deallocate stack
+	67 80 00 00       # jalr x0, ra, 0                ; Return
+
+
+# =====================================================================
+# Second_pass:
+# Output actual bytes, resolving labels to their addresses.
+# Output goes to memory buffer via a7.
+# =====================================================================
+:J
+	13 01 81 ff       # addi sp, sp, -8               ; Allocate stack
+	23 30 11 00       # sd ra, 0(sp)                  ; Save return address
+
+	# Set up output pointer (a7 = 0x80180000)
+	b7 18 00 00       # lui a7, 0x1
+	9b 88 38 00       # addiw a7, a7, 3               ; 0x1003
+	93 98 38 01       # slli a7, a7, 0x13             ; 0x80180000
+
+
+# Second_pass_loop:
+:K
+	@Z 63 50 b9 01    # bge s2, s11, Second_pass_done ; If at end of input, done
+	$x ef 00 00 00    # jal ra, Read_byte             ; Read next byte
+
+	# Check for ':' (0x3A) - skip label (already processed)
+	13 03 a0 03       # addi t1, x0, 0x3a             ; t1 = ':'
+	@L 63 10 65 00    # bne a0, t1, Second_pass_0     ; If not ':', continue
+
+	# Skip label token
+	b7 25 00 00       # lui a1, 0x2
+	9b 85 75 00       # addiw a1, a1, 7               ; 0x2007
+	93 95 25 01       # slli a1, a1, 0x12             ; a1 = 0x801C0000 (scratch)
+	$f ef 00 00 00    # jal ra, consume_token         ; Read and discard token
+	$d ef 00 00 00    # jal ra, ClearScratch          ; Clear scratch
+	$K 6f 00 00 00    # jal x0, Second_pass_loop      ; Continue loop
+
+
+# Second_pass_0:
+:L
+	# Check for '.' (0x2E) - word literal
+	13 03 e0 02       # addi t1, x0, 0x2e             ; t1 = '.'
+	@M 63 00 65 00    # beq a0, t1, Second_pass_UpdateWord
+
+	# Check for '%' (0x25) - relative pointer
+	13 03 50 02       # addi t1, x0, 0x25             ; t1 = '%'
+	@V 63 00 65 00    # beq a0, t1, StorePointer
+
+	# Check for '&' (0x26) - absolute pointer
+	13 03 60 02       # addi t1, x0, 0x26             ; t1 = '&'
+	@V 63 00 65 00    # beq a0, t1, StorePointer
+
+	# Check for '!' (0x21) - I-format displacement
+	13 03 10 02       # addi t1, x0, 0x21             ; t1 = '!'
+	@O 63 00 65 00    # beq a0, t1, UpdateShiftRegister
+
+	# Check for '@' (0x40) - B-format displacement
+	13 03 00 04       # addi t1, x0, 0x40             ; t1 = '@'
+	@O 63 00 65 00    # beq a0, t1, UpdateShiftRegister
+
+	# Check for '$' (0x24) - J-format displacement
+	13 03 40 02       # addi t1, x0, 0x24             ; t1 = '$'
+	@O 63 00 65 00    # beq a0, t1, UpdateShiftRegister
+
+	# Check for '~' (0x7E) - U-format displacement
+	13 03 e0 07       # addi t1, x0, 0x7e             ; t1 = '~'
+	@O 63 00 65 00    # beq a0, t1, UpdateShiftRegister
+
+	# Check for '<' (0x3C) - alignment padding
+	13 03 c0 03       # addi t1, x0, 0x3c             ; t1 = '<'
+	93 05 00 00       # addi a1, x0, 0                ; write = true
+	@a 63 00 65 00    # beq a0, t1, PadToAlign
+
+	# Handle everything else (hex digits, whitespace, comments)
+	93 05 00 00       # addi a1, x0, 0                ; write = true
+	13 06 f0 ff       # addi a2, x0, -1               ; update = false
+	$i ef 00 00 00    # jal ra, DoByte                ; Process the byte
+	$K 6f 00 00 00    # jal x0, Second_pass_loop      ; Continue loop
+
+
+# Second_pass_UpdateWord:
+# Handle '.' word literal - read 4 hex bytes and XOR with shiftregister
+:M
+	13 0d 00 00       # addi s10, x0, 0               ; updates = 0
+	93 0b 00 00       # addi s7, x0, 0                ; tempword = 0
+	93 07 40 00       # addi a5, x0, 4                ; a5 = 4 (loop counter)
+
+# Second_pass_UpdateWord_loop:
+:N
+	$x ef 00 00 00    # jal ra, Read_byte             ; Read next byte
+	93 05 f0 ff       # addi a1, x0, -1               ; write = false
+	13 06 00 00       # addi a2, x0, 0                ; update = true
+	$i ef 00 00 00    # jal ra, DoByte                ; Process byte
+	@N 63 40 fd 00    # blt s10, a5, Second_pass_UpdateWord_loop ; Loop 4 times
+	13 85 0b 00       # addi a0, s7, 0                ; a0 = tempword
+	$P 6f 00 00 00    # jal x0, UpdateShiftRegister_DOT
+
+
+# UpdateShiftRegister:
+# Calculate displacement and encode according to instruction format
+:O
+	13 06 05 00       # addi a2, a0, 0                ; a2 = prefix character
+	b7 25 00 00       # lui a1, 0x2
+	9b 85 75 00       # addiw a1, a1, 7               ; 0x2007
+	93 95 25 01       # slli a1, a1, 0x12             ; a1 = 0x801C0000 (scratch)
+	$d ef 00 00 00    # jal ra, ClearScratch          ; Clear scratch
+	$f ef 00 00 00    # jal ra, consume_token         ; Read label into scratch
+	$0 ef 00 00 00    # jal ra, GetTarget             ; Get label address
+	03 35 05 00       # ld a0, 0(a0)                  ; Dereference to get target
+	33 05 65 41       # sub a0, a0, s6                ; displacement = target - ip
+
+	# Dispatch based on prefix character
+	13 03 10 02       # addi t1, x0, 0x21             ; t1 = '!'
+	@Q 63 00 66 00    # beq a2, t1, UpdateShiftRegister_I
+
+	13 03 00 04       # addi t1, x0, 0x40             ; t1 = '@'
+	@R 63 00 66 00    # beq a2, t1, UpdateShiftRegister_B
+
+	13 03 40 02       # addi t1, x0, 0x24             ; t1 = '$'
+	@S 63 00 66 00    # beq a2, t1, UpdateShiftRegister_J
+
+	13 03 e0 07       # addi t1, x0, 0x7e             ; t1 = '~'
+	@T 63 00 66 00    # beq a2, t1, UpdateShiftRegister_U
+
+	$K 6f 00 00 00    # jal x0, Second_pass_loop      ; Continue loop
+
+
+# UpdateShiftRegister_DOT:
+# Handle '.' - byte-swap 32-bit value and XOR with shiftregister
+# swap = (((value >> 24) & 0xff) |
+#        ((value << 8) & 0xff0000) |
+#        ((value >> 8) & 0xff00) |
+#        ((value << 24) & 0xff000000))
+:P
+	9b 53 85 01       # srliw t2, a0, 0x18            ; value >> 24
+	13 03 f0 0f       # addi t1, x0, 255              ; t1 = 0xff
+	b3 72 73 00       # and t0, t1, t2                ; (value >> 24) & 0xff
+
+	9b 13 85 00       # slliw t2, a0, 0x8             ; value << 8
+	37 03 ff 00       # lui t1, 0xff0                 ; t1 = 0xff0000
+	b3 73 73 00       # and t2, t1, t2                ; (value << 8) & 0xff0000
+	b3 e2 72 00       # or t0, t0, t2                 ; Accumulate
+
+	9b 53 85 00       # srliw t2, a0, 0x8             ; value >> 8
+	37 03 01 00       # lui t1, 0x10                  ; t1 = 0x10000
+	1b 03 03 f0       # addiw t1, t1, -256            ; t1 = 0xff00
+	b3 73 73 00       # and t2, t1, t2                ; (value >> 8) & 0xff00
+	b3 e2 72 00       # or t0, t0, t2                 ; Accumulate
+
+	9b 13 85 01       # slliw t2, a0, 0x18            ; value << 24
+	1b 03 f0 0f       # addiw t1, x0, 255             ; t1 = 0xff
+	13 13 83 01       # slli t1, t1, 0x18             ; t1 = 0xff000000
+	b3 73 73 00       # and t2, t1, t2                ; (value << 24) & 0xff000000
+	b3 e2 72 00       # or t0, t0, t2                 ; swap complete
+
+	33 4c 5c 00       # xor s8, s8, t0                ; shiftregister ^= swap
+	13 0b cb ff       # addi s6, s6, -4               ; ip -= 4
+	$K 6f 00 00 00    # jal x0, Second_pass_loop      ; Continue loop
+
+
+# UpdateShiftRegister_I:
+# RISC-V I-format: imm[11:0] in bits [31:20]
+# tempword = (value & 0xfff) << 20
+:Q
+	1b 05 45 00       # addiw a0, a0, 4               ; Add 4 (AUIPC+ADDI combo)
+	37 13 00 00       # lui t1, 0x1
+	1b 03 f3 ff       # addiw t1, t1, -1              ; t1 = 0xfff
+	33 73 65 00       # and t1, a0, t1                ; value & 0xfff
+	9b 1b 43 01       # slliw s7, t1, 0x14            ; tempword = (value & 0xfff) << 20
+	33 4c 7c 01       # xor s8, s8, s7                ; shiftregister ^= tempword
+	$K 6f 00 00 00    # jal x0, Second_pass_loop      ; Continue loop
+
+
+# UpdateShiftRegister_B:
+# RISC-V B-format: imm[12|10:5] in [31:25], imm[4:1|11] in [11:7]
+# tempword = ((value & 0x1e) << 7)            ; imm[4:1]
+#          | ((value & 0x7e0) << 20)          ; imm[10:5]
+#          | ((value & 0x800) >> 4)           ; imm[11]
+#          | ((value & 0x1000) << 19)         ; imm[12]
+:R
+	13 03 e0 01       # addi t1, x0, 30               ; t1 = 0x1e
+	33 73 65 00       # and t1, a0, t1                ; value & 0x1e
+	9b 12 73 00       # slliw t0, t1, 0x7             ; (value & 0x1e) << 7
+
+	13 03 00 7e       # addi t1, x0, 2016             ; t1 = 0x7e0
+	33 73 65 00       # and t1, a0, t1                ; value & 0x7e0
+	1b 13 43 01       # slliw t1, t1, 0x14            ; (value & 0x7e0) << 20
+	b3 e2 62 00       # or t0, t0, t1                 ; Accumulate
+
+	37 13 00 00       # lui t1, 0x1
+	1b 03 03 80       # addiw t1, t1, -2048           ; t1 = 0x800
+	33 73 65 00       # and t1, a0, t1                ; value & 0x800
+	1b 53 43 00       # srliw t1, t1, 0x4             ; (value & 0x800) >> 4
+	b3 e2 62 00       # or t0, t0, t1                 ; Accumulate
+
+	37 13 00 00       # lui t1, 0x1                   ; t1 = 0x1000
+	33 73 65 00       # and t1, a0, t1                ; value & 0x1000
+	1b 13 33 01       # slliw t1, t1, 0x13            ; (value & 0x1000) << 19
+	b3 eb 62 00       # or s7, t0, t1                 ; tempword complete
+
+	33 4c 7c 01       # xor s8, s8, s7                ; shiftregister ^= tempword
+	$K 6f 00 00 00    # jal x0, Second_pass_loop      ; Continue loop
+
+
+# UpdateShiftRegister_J:
+# RISC-V J-format: imm[20|10:1|11|19:12] in bits [31:12]
+# tempword = ((value & 0x7fe) << 20)          ; imm[10:1]
+#          | ((value & 0x800) << 9)           ; imm[11]
+#          | (value & 0xff000)                ; imm[19:12]
+#          | ((value & 0x100000) << 11)       ; imm[20]
+:S
+	13 03 e0 7f       # addi t1, x0, 2046             ; t1 = 0x7fe
+	33 73 65 00       # and t1, a0, t1                ; value & 0x7fe
+	9b 12 43 01       # slliw t0, t1, 0x14            ; (value & 0x7fe) << 20
+
+	37 13 00 00       # lui t1, 0x1
+	1b 03 03 80       # addiw t1, t1, -2048           ; t1 = 0x800
+	33 73 65 00       # and t1, a0, t1                ; value & 0x800
+	1b 13 93 00       # slliw t1, t1, 0x9             ; (value & 0x800) << 9
+	b3 e2 62 00       # or t0, t0, t1                 ; Accumulate
+
+	37 f3 0f 00       # lui t1, 0xff                  ; t1 = 0xff000
+	33 73 65 00       # and t1, a0, t1                ; value & 0xff000
+	b3 e2 62 00       # or t0, t0, t1                 ; Accumulate
+
+	37 03 10 00       # lui t1, 0x100                 ; t1 = 0x100000
+	33 73 65 00       # and t1, a0, t1                ; value & 0x100000
+	1b 13 b3 00       # slliw t1, t1, 0xb             ; (value & 0x100000) << 11
+	b3 eb 62 00       # or s7, t0, t1                 ; tempword complete
+
+	33 4c 7c 01       # xor s8, s8, s7                ; shiftregister ^= tempword
+	$K 6f 00 00 00    # jal x0, Second_pass_loop      ; Continue loop
+
+
+# UpdateShiftRegister_U:
+# RISC-V U-format: imm[31:12] in bits [31:12]
+# If value[11:0] >= 0x800, add 0x1000 to compensate for signed extension
+:T
+	b7 12 00 00       # lui t0, 0x1
+	9b 82 02 80       # addiw t0, t0, -2048           ; t0 = 0x800
+	37 13 00 00       # lui t1, 0x1
+	1b 03 f3 ff       # addiw t1, t1, -1              ; t1 = 0xfff
+	b7 03 10 00       # lui t2, 0x100
+	9b 83 f3 ff       # addiw t2, t2, -1              ; t2 = 0xfffff
+	93 93 c3 00       # slli t2, t2, 0xc              ; t2 = 0xfffff000
+
+	33 73 65 00       # and t1, a0, t1                ; value & 0xfff
+	b3 7b 75 00       # and s7, a0, t2                ; value & 0xfffff000
+	@U 63 40 53 00    # blt t1, t0, UpdateShiftRegister_U_small ; If < 0x800, skip
+
+	# Add 0x1000 to compensate for sign extension
+	b7 12 00 00       # lui t0, 0x1                   ; t0 = 0x1000
+	bb 8b 72 01       # addw s7, t0, s7               ; tempword += 0x1000
+
+# UpdateShiftRegister_U_small:
+:U
+	33 4c 7c 01       # xor s8, s8, s7                ; shiftregister ^= tempword
+	$K 6f 00 00 00    # jal x0, Second_pass_loop      ; Continue loop
+
+
+# StorePointer:
+# Handle % (relative) and & (absolute) pointer references
+:V
+	13 0b 4b 00       # addi s6, s6, 4                ; ip += 4
+	13 06 05 00       # addi a2, a0, 0                ; a2 = prefix character
+	b7 25 00 00       # lui a1, 0x2
+	9b 85 75 00       # addiw a1, a1, 7               ; 0x2007
+	93 95 25 01       # slli a1, a1, 0x12             ; a1 = 0x801C0000 (scratch)
+	$d ef 00 00 00    # jal ra, ClearScratch          ; Clear scratch
+	$f ef 00 00 00    # jal ra, consume_token         ; Read label into scratch
+	93 07 05 00       # addi a5, a0, 0                ; a5 = terminating char
+	$0 ef 00 00 00    # jal ra, GetTarget             ; Get label address
+	83 35 05 00       # ld a1, 0(a0)                  ; a1 = target address
+
+	# Check for '>' (0x3E) - %label>label case
+	13 03 e0 03       # addi t1, x0, 0x3e             ; t1 = '>'
+	@Y 63 00 f3 00    # beq t1, a5, StorePointer_1    ; Handle %label>label
+
+	# Check for '&' (0x26) - absolute pointer
+	13 03 60 02       # addi t1, x0, 0x26             ; t1 = '&'
+	@W 63 00 66 00    # beq a2, t1, StorePointer_0    ; Absolute: use target directly
+
+	# Must be '%' (0x25) - relative pointer
+	13 03 50 02       # addi t1, x0, 0x25             ; t1 = '%'
+	@7 63 10 66 00    # bne a2, t1, Fail              ; If not '%', fail
+	b3 85 65 41       # sub a1, a1, s6                ; displacement = target - ip
+
+
+# StorePointer_0:
+# Output 4 bytes of pointer value (little-endian)
+:W
+	93 07 40 00       # addi a5, x0, 4                ; a5 = 4 (bytes to write)
+
+# StorePointer_loop:
+:X
+	13 d3 85 00       # srli t1, a1, 0x8              ; value >> 8
+	13 15 83 00       # slli a0, t1, 0x8              ; (value >> 8) << 8
+	33 85 a5 40       # sub a0, a1, a0                ; byte = value & 0xff
+	93 05 03 00       # addi a1, t1, 0                ; value = value >> 8
+	$6 ef 00 00 00    # jal ra, fputc                 ; Write byte
+	93 87 f7 ff       # addi a5, a5, -1               ; Decrement counter
+	@X 63 90 07 00    # bnez a5, StorePointer_loop    ; Loop 4 times
+	$K 6f 00 00 00    # jal x0, Second_pass_loop      ; Continue loop
+
+
+# StorePointer_1:
+# Handle %label>label - displacement between two labels
+:Y
+	13 86 05 00       # addi a2, a1, 0                ; a2 = first target
+	b7 25 00 00       # lui a1, 0x2
+	9b 85 75 00       # addiw a1, a1, 7               ; 0x2007
+	93 95 25 01       # slli a1, a1, 0x12             ; a1 = 0x801C0000 (scratch)
+	$d ef 00 00 00    # jal ra, ClearScratch          ; Clear scratch
+	$f ef 00 00 00    # jal ra, consume_token         ; Read second label
+	$0 ef 00 00 00    # jal ra, GetTarget             ; Get second label address
+	83 35 05 00       # ld a1, 0(a0)                  ; a1 = second target
+	b3 05 b6 40       # sub a1, a2, a1                ; displacement = first - second
+	$W 6f 00 00 00    # jal x0, StorePointer_0        ; Output the displacement
+
+
+# Second_pass_done:
+:Z
+	83 30 01 00       # ld ra, 0(sp)                  ; Restore return address
+	13 01 81 00       # addi sp, sp, 8                ; Deallocate stack
+	67 80 00 00       # jalr x0, ra, 0                ; Return
+
+
+# =====================================================================
+# PadToAlign:
+# Pad with zeros to align to 4-byte boundary
+# a1 = write flag (0 = write, -1 = don't write)
+# =====================================================================
+:a
+	# Check if ip & 1 == 1 (odd address)
+	13 03 10 00       # addi t1, x0, 1                ; t1 = 1
+	33 75 6b 00       # and a0, s6, t1                ; ip & 1
+	@b 63 10 65 00    # bne a0, t1, PadToAlign_1      ; If not odd, skip
+	33 0b 6b 00       # add s6, s6, t1                ; ip += 1
+	@b 63 90 05 00    # bnez a1, PadToAlign_1         ; If write=false, skip write
+	13 05 00 00       # addi a0, x0, 0                ; a0 = 0
+	$6 ef 00 00 00    # jal ra, fputc                 ; Write padding byte
+
+# PadToAlign_1:
+# Check if ip & 2 == 2
+:b
+	13 03 20 00       # addi t1, x0, 2                ; t1 = 2
+	33 75 6b 00       # and a0, s6, t1                ; ip & 2
+	@c 63 10 65 00    # bne a0, t1, PadToAlign_2      ; If not set, skip
+	33 0b 6b 00       # add s6, s6, t1                ; ip += 2
+	@c 63 90 05 00    # bnez a1, PadToAlign_2         ; If write=false, skip write
+	13 05 00 00       # addi a0, x0, 0                ; a0 = 0
+	$6 ef 00 00 00    # jal ra, fputc                 ; Write first padding byte
+	13 05 00 00       # addi a0, x0, 0                ; a0 = 0
+	$6 ef 00 00 00    # jal ra, fputc                 ; Write second padding byte
+
+# PadToAlign_2:
+# Return to appropriate pass
+:c
+	@K 63 80 05 00    # beqz a1, Second_pass_loop     ; If write=true, to second pass
+	$D 6f 00 00 00    # jal x0, First_pass_loop       ; Else to first pass
+
+
+# =====================================================================
+# ClearScratch:
+# Zero the scratch area at 0x801C0000
+# =====================================================================
+:d
+	13 01 81 fe       # addi sp, sp, -24              ; Allocate stack
+	23 30 11 00       # sd ra, 0(sp)                  ; Save ra
+	23 34 a1 00       # sd a0, 8(sp)                  ; Save a0
+	23 38 b1 00       # sd a1, 16(sp)                 ; Save a1
+
+	# Set up scratch pointer (a0 = 0x801C0000)
+	37 25 00 00       # lui a0, 0x2
+	1b 05 75 00       # addiw a0, a0, 7               ; 0x2007
+	13 15 25 01       # slli a0, a0, 0x12             ; 0x801C0000
+
+# ClearScratch_loop:
+:e
+	83 05 05 00       # lb a1, 0(a0)                  ; Read current byte
+	23 00 05 00       # sb x0, 0(a0)                  ; Write zero
+	13 05 15 00       # addi a0, a0, 1                ; Increment pointer
+	@e 63 90 05 00    # bnez a1, ClearScratch_loop    ; Loop until zero byte
+
+	83 30 01 00       # ld ra, 0(sp)                  ; Restore ra
+	03 35 81 00       # ld a0, 8(sp)                  ; Restore a0
+	83 35 01 01       # ld a1, 16(sp)                 ; Restore a1
+	13 01 81 01       # addi sp, sp, 24               ; Deallocate stack
+	67 80 00 00       # jalr x0, ra, 0                ; Return
+
+
+# =====================================================================
+# consume_token:
+# Read characters into buffer at a1 until whitespace or '>'
+# Returns terminating character in a0, updates a1 past null terminator
+# =====================================================================
+:f
+	13 01 81 ff       # addi sp, sp, -8               ; Allocate stack
+	23 30 11 00       # sd ra, 0(sp)                  ; Save ra
+
+# consume_token_0:
+:g
+	@h 63 50 b9 01    # bge s2, s11, consume_token_done ; If at end, done
+	$x ef 00 00 00    # jal ra, Read_byte             ; Read next byte
+
+	# Check for tab (0x09)
+	13 03 90 00       # addi t1, x0, 0x09             ; t1 = '\t'
+	@h 63 00 65 00    # beq a0, t1, consume_token_done
+
+	# Check for newline (0x0A)
+	13 03 a0 00       # addi t1, x0, 0x0a             ; t1 = '\n'
+	@h 63 00 65 00    # beq a0, t1, consume_token_done
+
+	# Check for space (0x20)
+	13 03 00 02       # addi t1, x0, 0x20             ; t1 = ' '
+	@h 63 00 65 00    # beq a0, t1, consume_token_done
+
+	# Check for '>' (0x3E)
+	13 03 e0 03       # addi t1, x0, 0x3e             ; t1 = '>'
+	@h 63 00 65 00    # beq a0, t1, consume_token_done
+
+	# Store character and continue
+	23 80 a5 00       # sb a0, 0(a1)                  ; Store char in buffer
+	93 85 15 00       # addi a1, a1, 1                ; Increment buffer pointer
+	$g 6f 00 00 00    # jal x0, consume_token_0       ; Continue loop
+
+
+# consume_token_done:
+:h
+	23 b0 05 00       # sd x0, 0(a1)                  ; Null-terminate (8 bytes)
+	93 85 85 00       # addi a1, a1, 8                ; Move past null terminator
+	83 30 01 00       # ld ra, 0(sp)                  ; Restore ra
+	13 01 81 00       # addi sp, sp, 8                ; Deallocate stack
+	67 80 00 00       # jalr x0, ra, 0                ; Return
+
+
+# =====================================================================
+# DoByte:
+# Process a hex character
+# a0 = character, a1 = write flag, a2 = update flag
+# =====================================================================
+:i
+	13 01 01 ff       # addi sp, sp, -16              ; Allocate stack
+	23 30 11 00       # sd ra, 0(sp)                  ; Save ra
+	23 34 01 01       # sd a6, 8(sp)                  ; Save a6
+
+	$p ef 00 00 00    # jal ra, hex                   ; Convert to hex value in a6
+
+	@n 63 40 08 00    # bltz a6, DoByte_Done          ; If -1, skip (not hex)
+
+	@l 63 10 0a 00    # bnez s4, DoByte_NotToggle     ; If toggle=false, go to NotToggle
+
+	# toggle = true (second nibble)
+	@j 63 90 05 00    # bnez a1, DoByte_1             ; If write=false, skip output
+
+	# write = true: output byte = (hold << 4 | hex) ^ shiftregister[0]
+	93 02 f0 0f       # addi t0, x0, 255              ; t0 = 0xff
+	b3 72 5c 00       # and t0, s8, t0                ; sr_nextb = shiftregister & 0xff
+	1b 5c 8c 00       # srliw s8, s8, 0x8             ; shiftregister >>= 8
+	b3 c2 02 01       # xor t0, t0, a6                ; hex ^ sr_nextb
+	13 93 4a 00       # slli t1, s5, 0x4              ; hold << 4
+	33 85 62 00       # add a0, t0, t1                ; (hold << 4) + (hex ^ sr_nextb)
+	$6 ef 00 00 00    # jal ra, fputc                 ; Write byte
+
+
+# DoByte_1:
+:j
+	13 0b 1b 00       # addi s6, s6, 1                ; ip += 1
+	@o 63 00 06 00    # beqz a2, DoByte_2             ; If update=true, go to update
+
+# DoByte_2b:
+:k
+	93 0a 00 00       # addi s5, x0, 0                ; hold = 0
+	$m 6f 00 00 00    # jal x0, DoByte_FlipToggle
+
+
+# DoByte_NotToggle:
+# toggle = false (first nibble) - save in hold
+:l
+	93 0a 08 00       # addi s5, a6, 0                ; hold = hex(c)
+
+
+# DoByte_FlipToggle:
+:m
+	13 4a fa ff       # xori s4, s4, -1               ; toggle = ~toggle
+
+
+# DoByte_Done:
+:n
+	83 30 01 00       # ld ra, 0(sp)                  ; Restore ra
+	03 38 81 00       # ld a6, 8(sp)                  ; Restore a6
+	13 01 01 01       # addi sp, sp, 16               ; Deallocate stack
+	67 80 00 00       # jalr x0, ra, 0                ; Return
+
+
+# DoByte_2:
+# update = true: accumulate into tempword
+:o
+	13 93 4a 00       # slli t1, s5, 0x4              ; hold << 4
+	b3 0a 03 01       # add s5, t1, a6                ; hold = (hold << 4) + hex
+	13 93 8b 00       # slli t1, s7, 0x8              ; tempword << 8
+	b3 4b 53 01       # xor s7, t1, s5                ; tempword = (tempword << 8) ^ hold
+	13 0d 1d 00       # addi s10, s10, 1              ; updates += 1
+	$k 6f 00 00 00    # jal x0, DoByte_2b
+
+
+# =====================================================================
+# hex:
+# Convert ASCII hex character to binary value
+# Input: a0 = character
+# Output: a6 = hex value (0-15) or -1 if not hex
+# =====================================================================
+:p
+	13 01 01 ff       # addi sp, sp, -16              ; Allocate stack
+	23 30 11 00       # sd ra, 0(sp)                  ; Save ra
+	23 34 b1 00       # sd a1, 8(sp)                  ; Save a1
+
+	# Check for '#' (0x23) - line comment
+	13 03 30 02       # addi t1, x0, 0x23             ; t1 = '#'
+	@u 63 00 65 00    # beq a0, t1, ascii_comment
+
+	# Check for ';' (0x3B) - line comment
+	13 03 b0 03       # addi t1, x0, 0x3b             ; t1 = ';'
+	@u 63 00 65 00    # beq a0, t1, ascii_comment
+
+	# Check for < '0' (0x30)
+	13 03 00 03       # addi t1, x0, 0x30             ; t1 = '0'
+	@t 63 40 65 00    # blt a0, t1, ascii_other       ; If < '0', not hex
+
+	# Check for '0'-'9'
+	13 03 a0 03       # addi t1, x0, 0x3a             ; t1 = '9' + 1
+	@q 63 40 65 00    # blt a0, t1, ascii_num         ; If < ':', it's 0-9
+
+	# Check for < 'A' (0x41)
+	13 03 10 04       # addi t1, x0, 0x41             ; t1 = 'A'
+	@t 63 40 65 00    # blt a0, t1, ascii_other       ; If < 'A', not hex
+
+	# Check for 'A'-'F'
+	13 03 70 04       # addi t1, x0, 0x47             ; t1 = 'F' + 1
+	@s 63 40 65 00    # blt a0, t1, ascii_high        ; If < 'G', it's A-F
+
+	# Check for < 'a' (0x61)
+	13 03 10 06       # addi t1, x0, 0x61             ; t1 = 'a'
+	@t 63 40 65 00    # blt a0, t1, ascii_other       ; If < 'a', not hex
+
+	# Check for 'a'-'f'
+	13 03 70 06       # addi t1, x0, 0x67             ; t1 = 'f' + 1
+	@r 63 40 65 00    # blt a0, t1, ascii_low         ; If < 'g', it's a-f
+
+	$t 6f 00 00 00    # jal x0, ascii_other           ; Everything else
+
+
+# ascii_num:
+# '0'-'9' -> 0-9
+:q
+	13 03 00 03       # addi t1, x0, 0x30             ; t1 = '0'
+	33 08 65 40       # sub a6, a0, t1                ; a6 = a0 - '0'
+	$w 6f 00 00 00    # jal x0, hex_return
+
+
+# ascii_low:
+# 'a'-'f' -> 10-15
+:r
+	13 03 70 05       # addi t1, x0, 0x57             ; t1 = 'a' - 10
+	33 08 65 40       # sub a6, a0, t1                ; a6 = a0 - ('a' - 10)
+	$w 6f 00 00 00    # jal x0, hex_return
+
+
+# ascii_high:
+# 'A'-'F' -> 10-15
+:s
+	13 03 70 03       # addi t1, x0, 0x37             ; t1 = 'A' - 10
+	33 08 65 40       # sub a6, a0, t1                ; a6 = a0 - ('A' - 10)
+	$w 6f 00 00 00    # jal x0, hex_return
+
+
+# ascii_other:
+# Not a hex digit
+:t
+	13 08 f0 ff       # addi a6, x0, -1               ; a6 = -1
+	$w 6f 00 00 00    # jal x0, hex_return
+
+
+# ascii_comment:
+# Skip until end of line
+:u
+	@v 63 50 b9 01    # bge s2, s11, hex_return_cr    ; If at end, done
+	$x ef 00 00 00    # jal ra, Read_byte             ; Read next byte
+	13 03 d0 00       # addi t1, x0, 0x0d             ; t1 = '\r'
+	@v 63 00 65 00    # beq a0, t1, hex_return_cr     ; If CR, done
+	13 03 a0 00       # addi t1, x0, 0x0a             ; t1 = '\n'
+	@u 63 10 65 00    # bne a0, t1, ascii_comment     ; If not LF, continue
+
+# hex_return_cr:
+:v
+	13 08 f0 ff       # addi a6, x0, -1               ; a6 = -1
+
+
+# hex_return:
+:w
+	83 30 01 00       # ld ra, 0(sp)                  ; Restore ra
+	83 35 81 00       # ld a1, 8(sp)                  ; Restore a1
+	13 01 01 01       # addi sp, sp, 16               ; Deallocate stack
+	67 80 00 00       # jalr x0, ra, 0                ; Return
+
+
+# =====================================================================
+# Read_byte:
+# Read one byte from input buffer into a0
+# =====================================================================
+:x
+	03 05 09 00       # lb a0, 0(s2)                  ; Load byte from input buffer
+	13 09 19 00       # addi s2, s2, 1                ; Increment buffer pointer
+	67 80 00 00       # jalr x0, ra, 0                ; Return
+
+
+# =====================================================================
+# read_char:
+# Read one character from UART
+# Polls LSR until data ready, then reads from RBR
+# =====================================================================
+:y
+	b7 02 00 10       # lui t0, 0x10000               ; UART base
+	9b 82 52 00       # addiw t0, t0, 5               ; t0 = LSR (0x10000005)
+
+# poll_rx:
+:z
+	03 85 02 00       # lb a0, 0(t0)                  ; Read LSR
+	13 75 15 00       # andi a0, a0, 1                ; Check bit 0 (data ready)
+	@z 63 00 05 00    # beqz a0, poll_rx              ; Loop until data ready
+
+	b7 02 00 10       # lui t0, 0x10000               ; UART base = RBR
+	03 85 02 00       # lb a0, 0(t0)                  ; Read received byte
+	67 80 00 00       # jalr x0, ra, 0                ; Return
+
+
+# =====================================================================
+# GetTarget:
+# Find label in jump table matching string in scratch
+# Returns pointer to target field in a0
+# =====================================================================
+:0
+	13 01 81 ff       # addi sp, sp, -8               ; Allocate stack
+	23 30 11 00       # sd ra, 0(sp)                  ; Save ra
+
+	93 82 04 00       # addi t0, s1, 0                ; t0 = jump_table head
+
+
+# GetTarget_loop_0:
+# Outer loop: iterate through linked list
+:1
+	37 23 00 00       # lui t1, 0x2
+	1b 03 73 00       # addiw t1, t1, 7               ; 0x2007
+	13 13 23 01       # slli t1, t1, 0x12             ; t1 = scratch (0x801C0000)
+	83 b3 02 01       # ld t2, 16(t0)                 ; t2 = entry->name
+
+
+# GetTarget_loop:
+# Inner loop: compare strings
+:2
+	83 ce 03 00       # lbu t4, 0(t2)                 ; t4 = entry->name[i]
+	03 4e 03 00       # lbu t3, 0(t1)                 ; t3 = scratch[i]
+	@3 63 10 de 01    # bne t3, t4, GetTarget_miss    ; If mismatch, try next entry
+	13 03 13 00       # addi t1, t1, 1                ; Increment scratch pointer
+	93 83 13 00       # addi t2, t2, 1                ; Increment name pointer
+	@2 63 90 0e 00    # bnez t4, GetTarget_loop       ; Loop until null terminator
+	$4 6f 00 00 00    # jal x0, GetTarget_done        ; Match found
+
+
+# GetTarget_miss:
+# Move to next entry in linked list
+:3
+	83 b2 02 00       # ld t0, 0(t0)                  ; t0 = entry->next
+	@7 63 80 02 00    # beqz t0, Fail                 ; If null, label not found
+	$1 6f 00 00 00    # jal x0, GetTarget_loop_0      ; Try next entry
+
+
+# GetTarget_done:
+:4
+	13 85 82 00       # addi a0, t0, 8                ; a0 = &entry->target
+	83 30 01 00       # ld ra, 0(sp)                  ; Restore ra
+	13 01 81 00       # addi sp, sp, 8                ; Deallocate stack
+	67 80 00 00       # jalr x0, ra, 0                ; Return
+
+
+# =====================================================================
+# StoreLabel:
+# Create new entry in jump table for current label
+# Allocates struct from heap, stores ip and label name
+# =====================================================================
+:5
+	13 01 81 ff       # addi sp, sp, -8               ; Allocate stack
+	23 30 11 00       # sd ra, 0(sp)                  ; Save ra
+
+	13 85 0c 00       # addi a0, s9, 0                ; a0 = malloc pointer (new entry)
+	93 8c 8c 01       # addi s9, s9, 24               ; Allocate 24 bytes for struct
+	23 34 65 01       # sd s6, 8(a0)                  ; entry->target = ip
+	23 30 95 00       # sd s1, 0(a0)                  ; entry->next = jump_table
+	93 04 05 00       # addi s1, a0, 0                ; jump_table = entry
+	23 38 95 01       # sd s9, 16(a0)                 ; entry->name = next free heap
+	93 85 0c 00       # addi a1, s9, 0                ; a1 = where to store name
+	$f ef 00 00 00    # jal ra, consume_token         ; Read label name
+	93 8c 05 00       # addi s9, a1, 0                ; Update malloc pointer
+
+	83 30 01 00       # ld ra, 0(sp)                  ; Restore ra
+	13 01 81 00       # addi sp, sp, 8                ; Deallocate stack
+	$D 6f 00 00 00    # jal x0, First_pass_loop       ; Return to first pass
+
+
+# =====================================================================
+# fputc:
+# Write one byte to output buffer
+# Input: a0 = byte to write
+# Uses a7 as output pointer (set up in Second_pass)
+# =====================================================================
+:6
+	23 80 a8 00       # sb a0, 0(a7)                  ; Store byte at output pointer
+	93 88 18 00       # addi a7, a7, 1                ; Increment output pointer
+	67 80 00 00       # jalr x0, ra, 0                ; Return
+
+
+# =====================================================================
+# Fail:
+# Infinite loop on error (label not found)
+# =====================================================================
+:7
+	$7 6f 00 00 00    # jal x0, Fail                  ; Infinite loop

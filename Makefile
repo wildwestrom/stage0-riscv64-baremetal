@@ -21,7 +21,7 @@ C_BINS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.bin)
 C_ASMS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.s)
 HEX0_ASM := $(BUILD_DIR)/stage0_monitor.s
 
-.PHONY: all clean test_echo test_hex0 test_hex0_handwritten test_hex0_prototype test_hex1 prototypes debug force_test_echo force_test_hex0 force_test_hex1 verify_hex0
+.PHONY: all clean test_echo test_hex0 test_hex0_handwritten test_hex0_prototype test_hex1 test_hex2 prototypes debug force_test_echo force_test_hex0 force_test_hex1 force_test_hex2 verify_hex0
 
 all: $(BUILD_DIR)/echo.bin $(BUILD_DIR)/hex0.bin
 
@@ -160,6 +160,30 @@ $(BUILD_DIR)/hex1_echo.ok: $(BUILD_DIR)/hex1_echo.out
 
 force_test_hex1:
 	rm -f $(BUILD_DIR)/hex1_echo.out $(BUILD_DIR)/hex1_echo.ok
+
+# Build hex2 from assembly
+$(BUILD_DIR)/hex2.o: baremetal/GAS/hex2.s | $(BUILD_DIR)
+	$(AS) $(ASFLAGS) $< -o $@
+
+$(BUILD_DIR)/hex2.elf: $(BUILD_DIR)/hex2.o
+	$(CC) $(LDFLAGS) $< -o $@
+
+$(BUILD_DIR)/hex2.bin: $(BUILD_DIR)/hex2.elf
+	$(OBJCOPY) -O binary $< $@
+
+# Test full toolchain up to hex2:
+# hex0.bin -> hex0.hex0 -> hex1.hex0 -> hex2.hex1 -> echo.hex2
+test_hex2: $(BUILD_DIR)/hex2_echo.ok
+
+$(BUILD_DIR)/hex2_echo.out: force_test_hex2 $(BUILD_DIR)/hex0.hex0 $(BUILD_DIR)/hex1.hex0 baremetal/hex2.hex1 uart_echo/echo.hex2 $(BUILD_DIR)/hex0.bin | $(BUILD_DIR)
+	(cat $(BUILD_DIR)/hex0.hex0; printf '\x04'; cat $(BUILD_DIR)/hex1.hex0; printf '\x04'; cat baremetal/hex2.hex1; printf '\x04'; cat uart_echo/echo.hex2; printf '\x04'; printf 'test\n') | timeout 2s qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/hex0.bin > $@ 2>&1 || true
+
+$(BUILD_DIR)/hex2_echo.ok: $(BUILD_DIR)/hex2_echo.out
+	grep -q 'test' $<
+	touch $@
+
+force_test_hex2:
+	rm -f $(BUILD_DIR)/hex2_echo.out $(BUILD_DIR)/hex2_echo.ok
 
 debug_hex0: $(BUILD_DIR)/hex0.debug.elf
 	rm -f qemu-dbg.in qemu-dbg.out

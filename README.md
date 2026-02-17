@@ -52,12 +52,13 @@ People have a vested interest in their software being safe and correct. We alrea
 
 ## Where we're at
 
-The bootstrap chain is functional through `hex1`:
+The bootstrap chain is functional through `hex2`:
 
 - **hex0**: Minimal hex loader - reads hex bytes from UART, stores in memory, executes on Ctrl-D
 - **hex1**: hex0 + single-character labels (`:x` to define, `@x` for B-format branches, `$x` for J-format jumps, `~x` for U-format upper immediate, `!x` for I-format lower immediate)
+- **hex2**: hex1 + multi-character labels (`:label_name`), relative pointers (`%label`, `&label`), word literals (`.XXXXXXXX`), alignment padding (`<`)
 
-Working chain: `hex0.bin → hex0.hex0 → hex1.hex0 → echo.hex1`
+Working chain: `hex0.bin → hex0.hex0 → hex1.hex0 → hex2.hex1 → program.hex2`
 
 The test suite verifies each stage can load and execute the next. Test programs echo characters via UART to confirm execution.
 
