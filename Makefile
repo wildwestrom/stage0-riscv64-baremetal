@@ -8,9 +8,6 @@ C_ASMFLAGS := $(CFLAGS) -fverbose-asm
 LDFLAGS := -Ttext=0x80000000 -e _start -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none -Wl,--strip-all
 LDFLAGS_DEBUG := -Ttext=0x80000000 -e _start -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none
 
-QEMU_TIMEOUT := 0.1s
-QEMU_TIMEOUT_LONG := 0.5s
-
 BUILD_DIR := build
 HEX0_C := baremetal/high_level_prototype/stage0_monitor.c
 C_SOURCES :=
@@ -21,7 +18,7 @@ C_BINS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.bin)
 C_ASMS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.s)
 HEX0_ASM := $(BUILD_DIR)/stage0_monitor.s
 
-.PHONY: all clean test_echo test_hex0 test_hex0_handwritten test_hex0_prototype test_hex1 test_hex2 prototypes debug force_test_echo force_test_hex0 force_test_hex1 force_test_hex2 verify_hex0
+.PHONY: all clean test_echo test_hex0 test_hex0_handwritten test_hex0_prototype test_hex1 test_hex2 test_m0 prototypes debug force_test_echo force_test_hex0 force_test_hex1 force_test_hex2 force_test_m0 verify_hex0
 
 all: $(BUILD_DIR)/echo.bin $(BUILD_DIR)/hex0.bin
 
@@ -92,7 +89,7 @@ $(BUILD_DIR)/hex1.elf: $(BUILD_DIR)/hex1.o
 
 # Build hex1 from hex1.hex0 using hex0 (assembled from .s)
 $(BUILD_DIR)/hex1_from_hex0.bin: baremetal/hex1.hex0 $(BUILD_DIR)/hex0.bin | $(BUILD_DIR)
-	{ cat $<; printf '\x04'; } | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/hex0.bin 2>/dev/null | tail -c +1 > $@
+	{ cat $<; printf '\x04'; } | timeout 0.2s qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/hex0.bin 2>/dev/null | tail -c +1 > $@
 
 # Verify that hex0.hex0 produces identical binary to assembly-generated hex0.bin
 verify_hex0: $(BUILD_DIR)/hex0.bin $(BUILD_DIR)/hex0_handwritten.bin
@@ -112,7 +109,7 @@ test_echo: $(BUILD_DIR)/echo.ok
 
 # This tests the echo program which is just supposed to echo each character back with a newline.
 $(BUILD_DIR)/echo.out: force_test_echo $(BUILD_DIR)/echo.bin | $(BUILD_DIR)
-	printf 'test' | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/echo.bin > $@ 2>&1 || true
+	printf 'test' | timeout 0.5s qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/echo.bin > $@ 2>&1 || true
 
 # Now we see if the test program echoed the correct sequence.
 $(BUILD_DIR)/echo.ok: $(BUILD_DIR)/echo.out
@@ -122,7 +119,7 @@ $(BUILD_DIR)/echo.ok: $(BUILD_DIR)/echo.out
 # This tests hex0 (assembly) loading itself, then using itself to load echo.
 # This verifies that hex0 can bootstrap itself and then load other programs.
 $(BUILD_DIR)/hex0_echo.out: force_test_hex0 $(BUILD_DIR)/hex0.hex0 $(BUILD_DIR)/echo.hex0 $(BUILD_DIR)/hex0.bin | $(BUILD_DIR)
-	{ cat $(BUILD_DIR)/hex0.hex0; printf '\x04'; cat $(BUILD_DIR)/echo.hex0; printf '\x04'; printf 'test\n'; } | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/hex0.bin > $@ 2>&1 || true
+	{ cat $(BUILD_DIR)/hex0.hex0; printf '\x04'; cat $(BUILD_DIR)/echo.hex0; printf '\x04'; printf 'test\n'; } | timeout 0.2s qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/hex0.bin > $@ 2>&1 || true
 
 $(BUILD_DIR)/hex0_echo.ok: $(BUILD_DIR)/hex0_echo.out
 	grep -q 'test' $<
@@ -133,7 +130,7 @@ test_hex0_handwritten: $(BUILD_DIR)/echo.ok $(BUILD_DIR)/hex0_handwritten_echo.o
 
 # This tests hex0 (from hex0.hex0) loading itself, then using itself to load echo.
 $(BUILD_DIR)/hex0_handwritten_echo.out: force_test_hex0 $(BUILD_DIR)/hex0.hex0 $(BUILD_DIR)/echo.hex0 $(BUILD_DIR)/hex0_handwritten.bin | $(BUILD_DIR)
-	{ cat $(BUILD_DIR)/hex0.hex0; printf '\x04'; cat $(BUILD_DIR)/echo.hex0; printf '\x04'; printf 'test\n'; } | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/hex0_handwritten.bin > $@ 2>&1 || true
+	{ cat $(BUILD_DIR)/hex0.hex0; printf '\x04'; cat $(BUILD_DIR)/echo.hex0; printf '\x04'; printf 'test\n'; } | timeout 0.2s qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/hex0_handwritten.bin > $@ 2>&1 || true
 
 $(BUILD_DIR)/hex0_handwritten_echo.ok: $(BUILD_DIR)/hex0_handwritten_echo.out
 	grep -q 'test' $<
@@ -142,7 +139,7 @@ $(BUILD_DIR)/hex0_handwritten_echo.ok: $(BUILD_DIR)/hex0_handwritten_echo.out
 # This tests stage0_monitor (C) loading itself, then using itself to load echo.
 # This verifies that the C prototype can bootstrap itself and then load other programs.
 $(BUILD_DIR)/hex0_prototype_echo.out: force_test_hex0 $(BUILD_DIR)/stage0_monitor.hex0 $(BUILD_DIR)/echo.hex0 $(BUILD_DIR)/stage0_monitor.bin | $(BUILD_DIR)
-	{ cat $(BUILD_DIR)/stage0_monitor.hex0; printf '\x04'; cat $(BUILD_DIR)/echo.hex0; printf '\x04'; printf 'test\n'; } | timeout $(QEMU_TIMEOUT) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/stage0_monitor.bin > $@ 2>&1 || true
+	{ cat $(BUILD_DIR)/stage0_monitor.hex0; printf '\x04'; cat $(BUILD_DIR)/echo.hex0; printf '\x04'; printf 'test\n'; } | timeout 0.2s qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/stage0_monitor.bin > $@ 2>&1 || true
 
 $(BUILD_DIR)/hex0_prototype_echo.ok: $(BUILD_DIR)/hex0_prototype_echo.out
 	grep -q 'test' $<
@@ -152,7 +149,7 @@ $(BUILD_DIR)/hex0_prototype_echo.ok: $(BUILD_DIR)/hex0_prototype_echo.out
 test_hex1: $(BUILD_DIR)/hex1_echo.ok
 
 $(BUILD_DIR)/hex1_echo.out: force_test_hex1 $(BUILD_DIR)/hex0.hex0 $(BUILD_DIR)/hex1.hex0 uart_echo/echo.hex1 $(BUILD_DIR)/hex0.bin | $(BUILD_DIR)
-	(cat $(BUILD_DIR)/hex0.hex0; printf '\x04'; cat $(BUILD_DIR)/hex1.hex0; printf '\x04'; cat uart_echo/echo.hex1; printf '\x04'; printf 'test\n') | timeout $(QEMU_TIMEOUT_LONG) qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/hex0.bin > $@ 2>&1 || true
+	(cat $(BUILD_DIR)/hex0.hex0; printf '\x04'; cat $(BUILD_DIR)/hex1.hex0; printf '\x04'; cat uart_echo/echo.hex1; printf '\x04'; printf 'test\n') | timeout 0.3s qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/hex0.bin > $@ 2>&1 || true
 
 $(BUILD_DIR)/hex1_echo.ok: $(BUILD_DIR)/hex1_echo.out
 	grep -q 'test' $<
@@ -176,7 +173,7 @@ $(BUILD_DIR)/hex2.bin: $(BUILD_DIR)/hex2.elf
 test_hex2: $(BUILD_DIR)/hex2_echo.ok
 
 $(BUILD_DIR)/hex2_echo.out: force_test_hex2 $(BUILD_DIR)/hex0.hex0 $(BUILD_DIR)/hex1.hex0 baremetal/hex2.hex1 uart_echo/echo.hex2 $(BUILD_DIR)/hex0.bin | $(BUILD_DIR)
-	(cat $(BUILD_DIR)/hex0.hex0; printf '\x04'; cat $(BUILD_DIR)/hex1.hex0; printf '\x04'; cat baremetal/hex2.hex1; printf '\x04'; cat uart_echo/echo.hex2; printf '\x04'; printf 'test\n') | timeout 2s qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/hex0.bin > $@ 2>&1 || true
+	(cat $(BUILD_DIR)/hex0.hex0; printf '\x04'; cat $(BUILD_DIR)/hex1.hex0; printf '\x04'; cat baremetal/hex2.hex1; printf '\x04'; cat uart_echo/echo.hex2; printf '\x04'; printf 'test\n') | timeout 1.5s qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/hex0.bin > $@ 2>&1 || true
 
 $(BUILD_DIR)/hex2_echo.ok: $(BUILD_DIR)/hex2_echo.out
 	grep -q 'test' $<
@@ -184,6 +181,34 @@ $(BUILD_DIR)/hex2_echo.ok: $(BUILD_DIR)/hex2_echo.out
 
 force_test_hex2:
 	rm -f $(BUILD_DIR)/hex2_echo.out $(BUILD_DIR)/hex2_echo.ok
+
+# Build M0 from assembly (for reference/debugging)
+$(BUILD_DIR)/M0.o: baremetal/GAS/M0.s | $(BUILD_DIR)
+	$(AS) $(ASFLAGS) $< -o $@
+
+$(BUILD_DIR)/M0.elf: $(BUILD_DIR)/M0.o
+	$(CC) $(LDFLAGS) $< -o $@
+
+$(BUILD_DIR)/M0.bin: $(BUILD_DIR)/M0.elf
+	$(OBJCOPY) -O binary $< $@
+
+# Test M0 through full bootstrap chain:
+# hex0.bin -> hex0.hex0 -> hex1.hex0 -> hex2.hex1 -> M0 processes echo.m0 -> hex2 -> echo binary
+# This uses the GAS-assembled M0 to process echo.m0, then feeds output through hex2 bootstrap chain
+test_m0: $(BUILD_DIR)/m0_echo.ok
+
+$(BUILD_DIR)/m0_echo.out: force_test_m0 $(BUILD_DIR)/M0.bin $(BUILD_DIR)/hex0.hex0 $(BUILD_DIR)/hex1.hex0 baremetal/hex2.hex1 uart_echo/echo.m0 $(BUILD_DIR)/hex0.bin | $(BUILD_DIR)
+	@# Step 1: M0 (GAS-assembled) processes echo.m0 -> hex2 format (timeout is expected)
+	(cat uart_echo/echo.m0; printf '\x04') | timeout 0.2s qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/M0.bin 2>/dev/null > $(BUILD_DIR)/echo.m0.hex2 || true
+	@# Step 2: Feed hex2 output through bootstrap chain, then test with input
+	(cat $(BUILD_DIR)/hex0.hex0; printf '\x04'; cat $(BUILD_DIR)/hex1.hex0; printf '\x04'; cat baremetal/hex2.hex1; printf '\x04'; cat $(BUILD_DIR)/echo.m0.hex2; printf '\x04'; printf 'test') | timeout 1s qemu-system-riscv64 -nographic -monitor none -serial stdio -machine virt -bios none -kernel $(BUILD_DIR)/hex0.bin > $@ 2>&1 || true
+
+$(BUILD_DIR)/m0_echo.ok: $(BUILD_DIR)/m0_echo.out
+	grep -q 'test' $<
+	touch $@
+
+force_test_m0:
+	rm -f $(BUILD_DIR)/m0_echo.out $(BUILD_DIR)/m0_echo.ok $(BUILD_DIR)/echo.m0.hex2
 
 debug_hex0: $(BUILD_DIR)/hex0.debug.elf
 	rm -f qemu-dbg.in qemu-dbg.out

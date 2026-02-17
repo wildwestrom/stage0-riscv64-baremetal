@@ -1,0 +1,83 @@
+## Copyright (C) 2026 Christian Westrom
+## This file is part of stage0.
+##
+## stage0 is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## stage0 is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with stage0.  If not, see <http://www.gnu.org/licenses/>.
+
+# UART Echo program in M0 format
+# Chain: M0 -> hex2 -> binary
+#
+# This program echoes characters received on UART back to the sender.
+# UART base: 0x10000000, LSR: 0x10000005
+
+# RISC-V RV64I instruction definitions
+# Each DEFINE is a complete 4-byte instruction in little-endian hex
+# Format: byte0 byte1 byte2 byte3 (as stored in memory)
+
+# Stack setup (sp = 0x80002220)
+# Built via: lui 0x40, addiw 1, slli 13, addi 0x220
+DEFINE lui_sp_0x40       37010400    # lui sp, 0x40
+DEFINE addiw_sp_sp_1     1B011100    # addiw sp, sp, 1
+DEFINE slli_sp_sp_13     1311D100    # slli sp, sp, 0xD
+DEFINE addi_sp_sp_0x220  13010122    # addi sp, sp, 0x220
+
+# UART address setup
+DEFINE lui_a1_0x10000    B7050010    # lui a1, 0x10000 (UART base)
+DEFINE lui_a2_0x10000    37060010    # lui a2, 0x10000
+DEFINE addiw_a2_a2_5     1B065600    # addiw a2, a2, 5 (a2 = LSR)
+
+# Load byte operations
+DEFINE lb_a0_0_a2        03050600    # lb a0, 0(a2)
+DEFINE lb_a0_0_a1        03850500    # lb a0, 0(a1)
+DEFINE lb_a3_0_a2        83060600    # lb a3, 0(a2)
+
+# Store byte operation
+DEFINE sb_a0_0_a1        2380A500    # sb a0, 0(a1)
+
+# ALU operations
+DEFINE andi_a0_a0_1      13751500    # andi a0, a0, 1
+DEFINE andi_a3_a3_0x20   93F60602    # andi a3, a3, 0x20
+
+# Branch/jump templates (offset filled in by hex2 via @/$ labels)
+DEFINE beq_a0_x0         63000500    # beq a0, x0, <offset>
+DEFINE beq_a3_x0         63800600    # beq a3, x0, <offset>
+DEFINE jal_x0            6F000000    # jal x0, <offset>
+
+
+# Program start
+:_start
+    lui_sp_0x40
+    addiw_sp_sp_1
+    slli_sp_sp_13
+    addi_sp_sp_0x220
+    lui_a1_0x10000
+    lui_a2_0x10000
+    addiw_a2_a2_5
+
+:echo_loop
+    # Poll LSR bit 0 (Data Ready)
+    lb_a0_0_a2
+    andi_a0_a0_1
+    @echo_loop beq_a0_x0
+    # Data ready, read from RBR
+    lb_a0_0_a1
+
+:wait_tx
+    # Wait for TX ready (bit 5 of LSR)
+    lb_a3_0_a2
+    andi_a3_a3_0x20
+    @wait_tx beq_a3_x0
+    # Echo the character
+    sb_a0_0_a1
+    # Loop forever
+    $echo_loop jal_x0
