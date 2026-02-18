@@ -4,10 +4,11 @@ What is this? It's basically [`stage0`](https://github.com/oriansj/stage0) but f
 
 ## Relevant Links
 
-https://bootstrappable.org/
-https://reproducible-builds.org/
-https://github.com/oriansj/stage0
-https://github.com/fosslinux/live-bootstrap
+- https://bootstrappable.org/
+- https://reproducible-builds.org/
+- https://github.com/oriansj/stage0
+- https://github.com/fosslinux/live-bootstrap
+- https://bootstrapping.miraheze.org/wiki/Main_Page
 
 ## The problem
 
@@ -29,7 +30,7 @@ First something a little nicer than assembly (post `M0`) which I'll call Tier 1:
 
 - LISP: Garbage collector, way more familiar to me (Clojure was my first language before Rust), probably not easy to access registers or memory
 - Forth: Supposedly trivial to implement in assembly, powerful, close to the hardware, but from what I saw, it's less readable than assembly. Not to mention the stack juggling I'll have to do in my head.
-- Oberon: small spec, similar to C semantically, used to implement a whole OS, but possibly too early in the toolchain
+- [Oberon](https://projectoberon.net/): small spec, similar to C semantically, used to implement a whole OS, but possibly too early in the toolchain
 - Something I don't know about.
 - Something completely new: I'm nowhere near an expert that can design and implement a language in assembly.
 
@@ -37,7 +38,7 @@ I could easily just steal or port an existing Tier 1, but I'd still have to then
 
 Then something nicer than that but still simple and powerful. All of these currently rely on C as part of their bootstrap process. Tier 2.
 
-- Oberon: for the reasons above, probably a good choice
+- [Oberon](https://projectoberon.net/): for the reasons above, probably a good choice
 - LISP: same problems as other lisps
 - Standard ML: great type system, probably very hard to implement
 - Something else I don't know about.
@@ -52,13 +53,14 @@ People have a vested interest in their software being safe and correct. We alrea
 
 ## Where we're at
 
-The bootstrap chain is functional through `hex2`:
+The bootstrap chain is functional through M0:
 
 - **hex0**: Minimal hex loader - reads hex bytes from UART, stores in memory, executes on Ctrl-D
 - **hex1**: hex0 + single-character labels (`:x` to define, `@x` for B-format branches, `$x` for J-format jumps, `~x` for U-format upper immediate, `!x` for I-format lower immediate)
 - **hex2**: hex1 + multi-character labels (`:label_name`), relative pointers (`%label`, `&label`), word literals (`.XXXXXXXX`), alignment padding (`<`)
+- **M0**: Macro assembler - adds `DEFINE name hex` to create named macros that expand to hex sequences, enabling readable assembly-like code
 
-Working chain: `hex0.bin → hex0.hex0 → hex1.hex0 → hex2.hex1 → program.hex2`
+Working chain: `hex0.bin → hex0.hex0 → hex1.hex0 → hex2.hex1 → M0.hex2 → echo.m0`
 
 The test suite verifies each stage can load and execute the next. Test programs echo characters via UART to confirm execution.
 
