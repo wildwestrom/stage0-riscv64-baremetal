@@ -23,8 +23,7 @@
 
 # Baremetal UART version for QEMU virt machine
 # Input: Read from UART until Ctrl-D
-# Output: Write hex text to UART, then halt
-# (Output is meant to be fed to hex0/hex1/hex2)
+# Output: Assemble and execute directly in memory
 
 # Register use:
 # s1: malloc pointer (heap)
@@ -34,10 +33,13 @@
 # s5: protected char
 # s6: scratch
 
-# Memory layout at 0x80100000:
-#   heap:          0x80100000 (128KB = 0x20000)
-#   input_buffer:  0x80120000 (64KB  = 0x10000)
-#   stack_top:     0x80130000
+# Memory layout:
+#   heap:               0x80100000
+#   raw_input_buffer:   0x80200000
+#   serialized_buffer:  0x80200000 (reuses raw input buffer after tokenization)
+#   output_buffer:      0x80300000
+#   backend_scratch:    0x80400000
+#   stack_top:          0x80500000
 
 # Struct format: (size 32)
 # NEXT => 0                           # Next element in linked list
@@ -54,21 +56,15 @@
 .global _start
 
 _start:
-    # Set up global pointer for data access
-    .option push
-    .option norelax
-    la gp, __global_pointer$
-    .option pop
-
     # Set up stack
-    li sp, 0x80130000
+    li sp, M0_STACK_TOP
 
     # Initialize registers
     li s4, 0                          # HEAD = NULL
-    li s1, 0x80100000                 # Heap starts at 0x80100000
+    li s1, M0_HEAP_BASE               # Heap starts here
 
     # Read all input from UART into buffer
-    li s2, 0x80120000                 # Input buffer start
+    li s2, M0_INPUT_BASE              # Input buffer start
     mv t1, s2                         # Save start for later
 
 read_input_loop:
@@ -96,10 +92,9 @@ input_done:
     jal Process_String                # Handle strings
     jal Eval_Immediates               # Handle numbers
     jal Preserve_Other                # Collect the remaining
-    jal Print_Hex                     # Output our results
-
-    # M0 produces hex text output, not binary
-    # Halt after output (the text is meant to be fed to hex0/hex1/hex2)
+    jal Serialize_Expressions         # Build text stream for backend assembler
+    mv a2, s1                         # Heap pointer for backend label allocations
+    jal M0_backend_assemble_and_exec  # Never returns on success
     j Fail
 
 # read_uart function
@@ -130,14 +125,12 @@ restart:
 
     mv a2, a0                         # Protect C
 
-    la a1, comments                   # Get pointer to "#;"
-    jal In_Set                        # Check for comments
+    jal IsCommentStarter              # Check for comments
     li t0, 1                          # If comment
     beq a0, t0, Purge_LineComment     # try again
 
     mv a0, a2                         # Put C in place for check
-    la a1, terminators                # Get pointer to "\n\t "
-    jal In_Set                        # Check for terminators
+    jal IsTerminator                  # Check for terminators
     li t0, 1                          # If terminator
     beq a0, t0, restart               # try again
 
@@ -145,11 +138,13 @@ restart:
     jal malloc                        # Get pointer to P
     mv a3, a0                         # Protect P
     sd s4, 0(a3)                      # P->NEXT = HEAD
+    sd zero, 8(a3)                    # P->TYPE = None
+    sd zero, 16(a3)                   # P->TEXT = NULL
+    sd zero, 24(a3)                   # P->EXPRESSION = NULL
     mv s4, a3                         # HEAD = P
 
     mv a0, a2                         # Put C in place for check
-    la a1, string_char                # Get pointer to "\"'"
-    jal In_Set                        # Check for string char
+    jal IsStringDelimiter             # Check for string char
     li t0, 1                          # If string char
     beq a0, t0, Store_String          # Get string
 
@@ -162,31 +157,43 @@ done:
     ret                               # return
 
 
-# In_Set function
-# Receives char C in a0 and Char* in a1
-# Returns 1 if true, zero if false in a0
-In_Set:
-    addi sp, sp, -8                   # allocate stack
-    sd a1, 0(sp)                      # protect a1
+# Returns 1 if a0 is '#' or ';', else 0.
+IsCommentStarter:
+    li t0, 35                         # '#'
+    beq a0, t0, IsCommentStarter_True
+    li t0, 59                         # ';'
+    beq a0, t0, IsCommentStarter_True
+    li a0, 0
+    ret
+IsCommentStarter_True:
+    li a0, 1
+    ret
 
-In_Set_loop:
-    lbu t0, (a1)                      # Read char
-    beq a0, t0, In_Set_True           # Return true
-    beqz t0, In_Set_False             # Return False if NULL
-    addi a1, a1, 1                    # s = s + 1
-    j In_Set_loop                     # Continue looping
+# Returns 1 if a0 is '\n', '\t', or ' ', else 0.
+IsTerminator:
+    li t0, 10                         # '\n'
+    beq a0, t0, IsTerminator_True
+    li t0, 9                          # '\t'
+    beq a0, t0, IsTerminator_True
+    li t0, 32                         # ' '
+    beq a0, t0, IsTerminator_True
+    li a0, 0
+    ret
+IsTerminator_True:
+    li a0, 1
+    ret
 
-In_Set_True:
-    li a0, 1                          # Set True
-    ld a1, 0(sp)                      # restore a1
-    addi sp, sp, 8                    # deallocate stack
-    ret                               # return
-
-In_Set_False:
-    mv a0, zero                       # Set False
-    ld a1, 0(sp)                      # restore a1
-    addi sp, sp, 8                    # deallocate stack
-    ret                               # return
+# Returns 1 if a0 is '\"' or '\\'', else 0.
+IsStringDelimiter:
+    li t0, 34                         # '"'
+    beq a0, t0, IsStringDelimiter_True
+    li t0, 39                         # '\''
+    beq a0, t0, IsStringDelimiter_True
+    li a0, 0
+    ret
+IsStringDelimiter_True:
+    li a0, 1
+    ret
 
 
 # Purge_LineComment function
@@ -217,6 +224,7 @@ Store_String_Loop:
     mv a2, a0                         # Update C
     addi a3, a3, 1                    # STRING = STRING + 1
     bne a1, a2, Store_String_Loop     # Keep looping unless we hit terminator
+    sb zero, 0(a3)                    # terminate scratch string
 
     mv a0, s6                         # Prepare the string in scratch
     jal string_length                 # Calculate length
@@ -254,6 +262,7 @@ copy_string_loop:
     j copy_string_loop                # Keep going
 
 copy_string_done:
+    sb zero, (a0)                    # write 0 terminator
     jal ClearScratch                  # Clear scratch
 
     ld ra, 0(sp)                      # restore ra
@@ -271,11 +280,12 @@ ClearScratch:
     sd a1, 16(sp)                     # protect a1
 
     mv a0, s6                         # Prepare scratch
+    li a1, 512                        # scratch size in bytes
 
 ClearScratch_loop:
-    lb a1, (a0)                       # Read current byte: s[i]
     sb zero, (a0)                     # Write zero: s[i] = 0
     addi a0, a0, 1                    # Increment: i = i + 1
+    addi a1, a1, -1                   # remaining bytes--
     bnez a1, ClearScratch_loop        # Keep looping
 
     ld ra, 0(sp)                      # restore ra
@@ -287,15 +297,12 @@ ClearScratch_loop:
 
 # Store_Atom Function
 # Receives C in a2, HEAD in a3 and Input in buffer
-# Uses a1 for in_set strings, a2 for C and a3 for string
+# Uses a2 for C and a3 for string
 Store_Atom:
-    addi sp, sp, -32                  # allocate stack
+    addi sp, sp, -24                  # allocate stack
     sd ra, 0(sp)                      # protect ra
-    sd a1, 8(sp)                      # protect a1
-    sd a2, 16(sp)                     # protect a2
-    sd a3, 24(sp)                     # protect a3
-
-    la a1, terminators                # Get pointer to "\n\t "
+    sd a2, 8(sp)                      # protect a2
+    sd a3, 16(sp)                     # protect a3
     mv a3, s6                         # Protect string pointer
 
 Store_Atom_loop:
@@ -303,22 +310,22 @@ Store_Atom_loop:
     jal fgetc                         # read next char
     mv a2, a0                         # Update C
     addi a3, a3, 1                    # STRING = STRING + 1
-    jal In_Set                        # Check for terminators
+    jal IsTerminator                  # Check for terminators
     beqz a0, Store_Atom_loop          # Loop if not "\n\t "
+    sb zero, 0(a3)                    # terminate scratch string
 
     mv a0, s6                         # Prepare the string in scratch
     jal string_length                 # Calculate length
     addi a0, a0, 1                    # Add 1 for 0 terminator
     jal malloc                        # Allocate memory
-    ld a3, 24(sp)                     # restore a3 (HEAD)
+    ld a3, 16(sp)                     # restore a3 (HEAD)
     sd a0, 16(a3)                     # HEAD->TEXT = STRING
     jal copy_string                   # Copy the string
 
     mv a0, a3                         # Return HEAD
     ld ra, 0(sp)                      # restore ra
-    ld a1, 8(sp)                      # restore a1
-    ld a2, 16(sp)                     # restore a2
-    addi sp, sp, 32                   # deallocate stack
+    ld a2, 8(sp)                      # restore a2
+    addi sp, sp, 24                   # deallocate stack
     ret                               # return
 
 
@@ -350,20 +357,17 @@ Reverse_List_Done:
 # Identify_Macros function
 # Receives List in a0
 # Updates the list in place; does not modify registers
-# Uses a1 for DEFINE, a2 for I
+# Uses a2 for I
 Identify_Macros:
-    addi sp, sp, -32                  # allocate stack
+    addi sp, sp, -24                  # allocate stack
     sd ra, 0(sp)                      # protect ra
     sd a0, 8(sp)                      # protect a0
-    sd a1, 16(sp)                     # protect a1
-    sd a2, 24(sp)                     # protect a2
-
-    la a1, DEFINE_str                 # Setup DEFINE string
+    sd a2, 16(sp)                     # protect a2
     mv a2, a0                         # I = HEAD
 
 Identify_Macros_Loop:
     ld a0, 16(a2)                     # I->TEXT
-    jal match                         # IF "DEFINE" == I->TEXT
+    jal match_DEFINE                  # IF "DEFINE" == I->TEXT
     bnez a0, Identify_Macros_Next     # Check if we got macro
 
     # Deal with MACRO
@@ -390,10 +394,40 @@ Identify_Macros_Next:
 
     ld ra, 0(sp)                      # restore ra
     ld a0, 8(sp)                      # restore a0
-    ld a1, 16(sp)                     # restore a1
-    ld a2, 24(sp)                     # restore a2
-    addi sp, sp, 32                   # deallocate stack
+    ld a2, 16(sp)                     # restore a2
+    addi sp, sp, 24                   # deallocate stack
     ret                               # return
+
+
+# match_DEFINE function
+# Receives CHAR* in a0
+# Returns 0 (TRUE) if string is exactly "DEFINE", else 1 (FALSE)
+match_DEFINE:
+    lbu t0, 0(a0)
+    li t1, 'D'
+    bne t0, t1, match_DEFINE_False
+    lbu t0, 1(a0)
+    li t1, 'E'
+    bne t0, t1, match_DEFINE_False
+    lbu t0, 2(a0)
+    li t1, 'F'
+    bne t0, t1, match_DEFINE_False
+    lbu t0, 3(a0)
+    li t1, 'I'
+    bne t0, t1, match_DEFINE_False
+    lbu t0, 4(a0)
+    li t1, 'N'
+    bne t0, t1, match_DEFINE_False
+    lbu t0, 5(a0)
+    li t1, 'E'
+    bne t0, t1, match_DEFINE_False
+    lbu t0, 6(a0)
+    bnez t0, match_DEFINE_False
+    li a0, 0
+    ret
+match_DEFINE_False:
+    li a0, 1
+    ret
 
 
 # match function
@@ -907,6 +941,61 @@ Preserve_Other_Next:
     ret                               # return
 
 
+# Serialize_Expressions function
+# Converts processed token expressions into a flat text stream.
+# Returns:
+#   a0 = start pointer
+#   a1 = end pointer
+Serialize_Expressions:
+    addi sp, sp, -32                  # allocate stack
+    sd ra, 0(sp)                      # protect ra
+    sd a2, 8(sp)                      # protect a2
+    sd a3, 16(sp)                     # protect a3
+    sd a4, 24(sp)                     # protect a4
+
+    li a2, M0_INPUT_BASE              # output text buffer start
+    mv a3, a2                         # running write pointer
+    mv a4, s4                         # I = HEAD
+
+Serialize_Expressions_Loop:
+    beqz a4, Serialize_Expressions_Done
+
+    ld t0, 8(a4)                      # I->TYPE
+    li t1, 1                          # MACRO
+    beq t0, t1, Serialize_Expressions_Next
+
+    ld t0, 24(a4)                     # I->EXPRESSION
+    beqz t0, Serialize_Expressions_Next
+
+Serialize_Expressions_Copy:
+    lbu t1, 0(t0)                     # c = expression[i]
+    beqz t1, Serialize_Expressions_Term
+    sb t1, 0(a3)                      # write c
+    addi a3, a3, 1
+    addi t0, t0, 1
+    j Serialize_Expressions_Copy
+
+Serialize_Expressions_Term:
+    li t1, 10                         # '\n'
+    sb t1, 0(a3)
+    addi a3, a3, 1
+
+Serialize_Expressions_Next:
+    ld a4, 0(a4)                      # I = I->NEXT
+    j Serialize_Expressions_Loop
+
+Serialize_Expressions_Done:
+    mv a0, a2                         # start pointer
+    mv a1, a3                         # end pointer
+
+    ld ra, 0(sp)                      # restore ra
+    ld a2, 8(sp)                      # restore a2
+    ld a3, 16(sp)                     # restore a3
+    ld a4, 24(sp)                     # restore a4
+    addi sp, sp, 32                   # deallocate stack
+    ret                               # return
+
+
 # Print_Hex function
 # Receives list in a0
 # walks the list and prints the I->EXPRESSION for all nodes followed by newline
@@ -1017,17 +1106,3 @@ Fail:
     j Fail
 
 # PROGRAM END
-
-.data
-
-terminators:
-    .byte 10, 9, 32, 0
-
-comments:
-    .byte 35, 59, 0
-
-string_char:
-    .byte 34, 39, 0
-
-DEFINE_str:
-    .byte 68, 69, 70, 73, 78, 69, 0

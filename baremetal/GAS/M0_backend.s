@@ -1,4 +1,5 @@
 ## Copyright (C) 2021 Andrius Štikonas
+## Copyright (C) 2026 Christian Westrom
 ## This file is part of stage0.
 ##
 ## stage0 is free software: you can redistribute it and/or modify
@@ -16,100 +17,62 @@
 
 
 # Register use:
-# s1: jump table
-# s2: input fd
-# s3: output fd
+# s1: jump table (linked list head)
+# s2: input buffer current position
+# s3: input buffer start (for rewinding)
 # s4: toggle
 # s5: hold
 # s6: ip
 # s7: tempword
 # s8: shiftregister
-# s9: malloc pointer
+# s9: malloc pointer (heap)
 # s10: updates
+# s11: input buffer end
 
 # Struct format: (size 24)
 # next => 0                      # Next element in linked list
 # target => 8                    # Target (ip)
 # name => 16                     # Label name
 
+# Memory layout:
+#   input_buffer: supplied by caller in a0..a1
+#   heap:         supplied by caller in a2
+#   output_buffer:0x80300000
+#   scratch:      0x80400000
+
 .text
-.global _start
-_start:
-    ld a2, 16(sp)                # Input file name
+.global M0_backend_assemble_and_exec
+M0_backend_assemble_and_exec:
+    # a0 = input_buffer start, a1 = input_buffer end, a2 = heap pointer
+    mv s2, a0
+    mv s3, a0
+    mv s11, a1
+    mv s9, a2
+    mv s1, zero                  # jump table head = NULL
 
     # Initialize globals
     li s4, -1                    # Toggle
     li s5, 0                     # Hold
-    li s6, 0x600000              # Instruction Pointer
-
-    # Open input file and store FD in s2
-    li a7, 56                    # sys_openat
-    li a0, -100                  # AT_FDCWD
-    mv a1, a2                    # input file
-    li a2, 0                     # read only
-    ecall                        # syscall
-    bltz a0, Fail                # Error opening file
-    mv s2, a0                    # Save fd in for later
-
-    # Set default FD for output file to stdout
-    li s3, 1
-
-    # If we only have 2 arguments, don't use the third (it's not set)
-    li t0, 2
-    ld a0, 0(sp)                 # Get number of the args
-    blt a0, t0, Fail             # No input file provided
-    beq a0, t0, after_open       # No output file provided. Use stdout
-
-    # Open output file and store the FD in s3
-    li a7, 56                    # sys_openat
-    li a0, -100                  # AT_FDCWD
-    ld a1, 24(sp)                # Output file (argument 3)
-    li a2, 00001101              # decimal 577
-    # O_TRUNC   00001000
-    # O_CREAT   00000100
-    # O_WRONLY  00000001
-    # OCTAL!
-    li a3, 00700                 # Set read, write, execute permission on user
-    # S_IRWXU  00700
-    # OCTAL!
-    ecall                        # syscall
-    mv s3, a0                    # Save fd in for later
-
-after_open:
-    # Prepare heap memory
-    li a7, 214                   # sys_brk
-    mv a0, zero                  # Get current brk
-    ecall                        # syscall
-    mv s9, a0                    # Set our malloc pointer
-
-    li a1, 0x100000
-    add a0, a0, a1               # Request the 1 MiB
-    li a7, 214                   # sys_brk
-    ecall                        # syscall
+    li s6, 0                     # Instruction Pointer (relative)
 
     jal ClearScratch             # Zero scratch
     jal First_pass               # First pass
 
-    # Rewind input file
-    li a7, 62                    # sys_lseek
-    mv a0, s2                    # Input file descriptor
-    mv a1, zero                  # Set offset to zero
-    mv a2, zero                  # Set whence to zero
-    ecall                        # syscall
+    # Rewind input buffer
+    mv s2, s3                    # Reset to start of buffer
 
     # Initialize globals
     li s4, -1                    # Toggle
     li s5, 0                     # Hold
-    li s6, 0x600000              # Instruction Pointer
+    li s6, 0                     # Instruction Pointer
     li s7, 0                     # tempword
     li s8, 0                     # Shift register
 
     jal Second_pass              # Now do the second pass
 
-    # Terminate program with 0 return code
-    li a7, 93                    # sys_exit
-    li a0, 0                     # Return code 0
-    ecall                        # exit(0)
+    # Execute the assembled code
+    li t0, 0x80300000            # output_buffer
+    jr t0
 
 # First pass loop to determine addresses of labels
 First_pass:
@@ -117,11 +80,8 @@ First_pass:
     sd ra, 0(sp)                 # protect ra
 
 First_pass_loop:
+    bge s2, s11, First_pass_done # Check if we've reached end of buffer
     jal Read_byte                # Get another byte
-
-    # Deal with EOF
-    li t1, -4
-    beq a0, t1, First_pass_done
 
     # Check for :
     li t1, 0x3a
@@ -164,13 +124,10 @@ First_pass_loop:
     li a2, -1                    # update = false
     jal DoByte                   # Deal with everything else
 
-    li t1, -4                    # Deal with EOF
-    beq a0, t1, First_pass_done
-
     j First_pass_loop            # Keep looping
 
 Throwaway_token:
-    la a1, scratch               # Using scratch
+    li a1, 0x80400000            # scratch address
     jal consume_token            # Read token
     jal ClearScratch             # Throw away token
     j First_pass_loop            # Loop again
@@ -178,14 +135,14 @@ Throwaway_token:
 First_pass_pointer:
     addi s6, s6, 4               # Update ip
     # Deal with Pointer to label
-    la a1, scratch               # Using scratch
+    li a1, 0x80400000            # scratch address
     jal consume_token            # Read token
     jal ClearScratch             # Throw away token
     li t1, 0x3e                  # Check for '>'
     bne a0, t1, First_pass_loop  # Loop again
 
     # Deal with %label>label case
-    la a1, scratch               # Using scratch
+    li a1, 0x80400000            # scratch address
     jal consume_token            # Read token
     jal ClearScratch             # Throw away token
     j First_pass_loop            # Loop again
@@ -215,18 +172,18 @@ Second_pass:
     addi sp, sp, -8              # Allocate stack
     sd ra, 0(sp)                 # protect ra
 
-Second_pass_loop:
-    jal Read_byte                # Read another byte
+    # Initialize output buffer pointer
+    li a7, 0x80300000            # output_buffer - use a7 as output pointer
 
-    # Deal with EOF
-    li t1, -4
-    beq a0, t1, Second_pass_done
+Second_pass_loop:
+    bge s2, s11, Second_pass_done # Check if we've reached end of buffer
+    jal Read_byte                # Read another byte
 
     # Drop the label
     li t1, 0x3a
     bne a0, t1, Second_pass_0
 
-    la a1, scratch               # Using scratch
+    li a1, 0x80400000            # scratch address
     jal consume_token            # Read the label
     jal ClearScratch             # Throw away token
 
@@ -271,10 +228,6 @@ Second_pass_0:
     li a2, -1                    # update = false
     jal DoByte                   # Process our char
 
-    # Deal with EOF
-    li t1, -4
-    beq a0, t1, Second_pass_done # We are done
-
     j Second_pass_loop           # continue looping
 
 Second_pass_UpdateWord:
@@ -295,7 +248,7 @@ Second_pass_UpdateWord_loop:
 
 UpdateShiftRegister:
     mv a2, a0                    # Store label prefix
-    la a1, scratch               # Get scratch
+    li a1, 0x80400000            # Get scratch
     jal ClearScratch             # Clear scratch
     jal consume_token            # Read token
     jal GetTarget                # Get target
@@ -448,7 +401,7 @@ StorePointer:
     addi s6, s6, 4               # Update ip
     mv a2, a0                    # Store label prefix
 
-    la a1, scratch               # Get scratch
+    li a1, 0x80400000            # Get scratch
     jal ClearScratch             # clear scratch
     jal consume_token            # consume token
     mv a5, a0                    # save char
@@ -477,15 +430,15 @@ StorePointer_loop:
     sub a0, a1, a0               # byte = value % 256
 
     mv a1, t1                    # value = value / 256
-    jal fputc                    # write value
-    addi a5, a5, -1              # decrease number of bytes to write 
+    jal write_byte               # write value
+    addi a5, a5, -1              # decrease number of bytes to write
     bnez a5, StorePointer_loop   # continue looping
 
     j Second_pass_loop           # Continue looping
 
 StorePointer_1:
     mv a2, a1                    # save target
-    la a1, scratch               # Get scratch
+    li a1, 0x80400000            # Get scratch
     jal ClearScratch             # clear scratch
     jal consume_token            # consume token
     jal GetTarget                # Get target
@@ -509,7 +462,7 @@ PadToAlign:
 
     bnez a1, PadToAlign_1        # check if we have to write
     mv a0, zero                  # a0 = 0
-    jal fputc                    # write 0
+    jal write_byte               # write 0
 
 PadToAlign_1:
     li t1, 2                     # t1 = 2
@@ -519,9 +472,9 @@ PadToAlign_1:
 
     bnez a1, PadToAlign_2        # check if we have to write
     mv a0, zero                  # a0 = 0
-    jal fputc                    # write 0
+    jal write_byte               # write 0
     mv a0, zero                  # a0 = 0
-    jal fputc                    # write 0
+    jal write_byte               # write 0
 
 PadToAlign_2:
     beqz a1, Second_pass_loop    # return to Second_pass
@@ -534,12 +487,13 @@ ClearScratch:
     sd a0, 8(sp)                 # protect a0
     sd a1, 16(sp)                # protect a1
 
-    la a0, scratch               # Find where our scratch area is
+    li a0, 0x80400000            # scratch address
+    li a1, 512                   # scratch size in bytes
 
 ClearScratch_loop:
-    lb a1, (a0)                  # Read current byte: s[i]
     sb zero, (a0)                # Write zero: s[i] = 0
     addi a0, a0, 1               # Increment: i = i + 1
+    addi a1, a1, -1              # remaining bytes--
     bnez a1, ClearScratch_loop   # Keep looping
 
     ld ra, 0(sp)                 # restore ra
@@ -555,6 +509,7 @@ consume_token:
     sd ra, 0(sp)                 # protect ra
 
 consume_token_0:
+    bge s2, s11, consume_token_done # Check bounds
     jal Read_byte                # Read byte into a0
 
     # Check for \t
@@ -598,7 +553,7 @@ DoByte:
 
     jal hex                      # Process hex, store it in a6
 
-    bltz a6, DoByte_Done         # Deal with EOF and unrecognized characters
+    bltz a6, DoByte_Done         # Deal with unrecognized characters
 
     bnez s4, DoByte_NotToggle    # Check if toggle is set
 
@@ -615,8 +570,7 @@ DoByte:
     xor t0, t0, a6               # hex(c) ^ sr_nextb
     slli t1, s5, 4               # hold * 16
     add a0, t0, t1               # (hold * 16) + hex(c) ^ sr_nextb()
-    jal fputc                    # print it
-    beqz a0, Fail                # Fail if nothing was written
+    jal write_byte               # write it
 
 DoByte_1:
     addi s6, s6, 1               # Increment IP
@@ -654,10 +608,6 @@ hex:
     addi sp, sp, -16             # Allocate stack
     sd ra, 0(sp)                 # protect ra
     sd a1, 8(sp)                 # protect a1
-
-    # Deal with EOF
-    li t1, -4
-    beq a0, t1, hex_return
 
     # deal with line comments starting with #
     li t1, 0x23
@@ -710,12 +660,13 @@ ascii_other:
     li a6, -1                    # Return -1
     j hex_return                 # return
 ascii_comment:                   # Read the comment until newline
+    bge s2, s11, ascii_comment_done # Check bounds
     jal Read_byte
     li t1, 0xd                   # CR
-    beq a0, t1, ascii_comment_cr
+    beq a0, t1, ascii_comment_done
     li t1, 0xa                   # LF
     bne a0, t1, ascii_comment    # Keep reading comment
-ascii_comment_cr:
+ascii_comment_done:
     li a6, -1                    # Return -1
 hex_return:
     ld ra, 0(sp)                 # restore ra
@@ -723,29 +674,23 @@ hex_return:
     addi sp, sp, 16              # Deallocate stack
     ret                          # return
 
-# Read byte into a0
+# Read byte from input buffer into a0
+# Caller must check s2 < s11 before calling
 Read_byte:
-    addi sp, sp, -24             # Allocate stack
-    sd a1, 8(sp)                 # protect a1
-    sd a2, 16(sp)                # protect a2
+    lb a0, 0(s2)                 # Load byte from buffer
+    addi s2, s2, 1               # Advance buffer pointer
+    ret                          # return
 
-    li a7, 63                    # sys_read
-    mv a0, s2                    # File descriptor
-    mv a1, sp                    # Get stack address for buffer
-    li a2, 1                     # Size of what we want to read
-    ecall                        # syscall
+# Read a character from UART into a0
+read_uart:
+    li t0, 0x10000005            # UART_LSR
+poll_rx:
+    lb a0, 0(t0)                 # Read LSR
+    andi a0, a0, 1               # Check bit 0 (Data Ready)
+    beq a0, zero, poll_rx        # If no data ready, keep polling
 
-    beqz a0, Read_byte_1         # Deal with EOF
-    lbu a0, (a1)                 # return char in a0
-
-    j Read_byte_done             # return
-
-Read_byte_1:
-    li a0, -4                    # Put EOF in a0
-Read_byte_done:
-    ld a1, 8(sp)                 # restore a1
-    ld a2, 16(sp)                # restore a2
-    addi sp, sp, 24              # Deallocate stack
+    li t0, 0x10000000            # UART_BASE
+    lb a0, 0(t0)                 # Read received byte
     ret                          # return
 
 # Find a label matching pointer in scratch
@@ -758,7 +703,7 @@ GetTarget:
 
 GetTarget_loop_0:
     # Compare the strings
-    la t1, scratch               # reset scratch
+    li t1, 0x80400000            # scratch
     ld t2, 16(t0)                # I->name
 GetTarget_loop:
     lbu t4, (t2)                 # I->name[i]
@@ -802,38 +747,16 @@ StoreLabel:
     addi sp, sp, 8               # Deallocate stack
     j First_pass_loop            # return
 
-# fputc function
+# write_byte function
 # Receives CHAR in a0
-# Writes and returns number of bytes written in a0
-fputc:
-    addi sp, sp, -32             # allocate stack
-    sd a0, 0(sp)                 # protect a0
-    sd ra, 8(sp)                 # protect ra
-    sd a1, 16(sp)                # protect a1
-    sd a2, 24(sp)                # protect a2
-
-    li a7, 64                    # sys_write
-    mv a0, s3                    # write to output
-    mv a1, sp                    # Get stack address
-    li a2, 1                     # write 1 character
-    ecall                        # syscall
-
-    ld ra, 8(sp)                 # restore ra
-    ld a1, 16(sp)                # restore a1
-    ld a2, 24(sp)                # restore a2
-    addi sp, sp, 32              # deallocate stack
+# Writes to output buffer using a7 as pointer
+write_byte:
+    sb a0, 0(a7)                 # Write byte to output buffer
+    addi a7, a7, 1               # Advance output pointer
     ret                          # return
 
 
 Fail:
-    # Terminate program with 1 return code
-    li a7, 93                    # sys_exit
-    li a0, 1                     # Return code 1
-    ecall                        # exit(1)
+    # Halt (infinite loop) - indicates an error
+    j Fail
 # PROGRAM END
-
-.data
-.align 4
-
-scratch:
-    .byte 0

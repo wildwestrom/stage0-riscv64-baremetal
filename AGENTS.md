@@ -1,77 +1,36 @@
-# CLAUDE.md
+# ATTN: Agents
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to LLMs when working with code in this repository. Any time you repeatedly make a mistake or waste time, put it here so you don't do it again.
 
-## Project Goal
+## Automated Testing
 
-This project explores bootstrapping a computing system **without C** in the bootstrap chain.
+Tests are automated with `just`. QEMU is used for testing since there's no physical RISC-V machine available.
 
-The premise: C (like assembly) is fundamentally unsound. Every existing bootstrappable toolchain makes C an integral part of the process. This project aims to create a new chain with a simpler, more rigorously specified language - something with a 10-page specification instead of 600 pages, potentially something formally verified.
+**Use `just` recipes - avoid writing shell commands by hand.** If a command you need isn't in the `justfile` and it's complicated, add it as a new recipe. It's much less error-prone and saves on context. I can always clear the context once we get a working command.
 
-The challenge is that doing so requires carving out a system incompatible with everything else:
+## Discovery
 
-- No compatibility with existing software (everything relies on C somewhere)
-- No compatibility with firmware interfaces (C ABI)
-- No ability to run on existing operating systems (C ABI/POSIX)
+The `tree` command is useful for discovering files within the project and understanding its current structure. Also use `tree --gitignore` for less noisy output.
 
-Despite the incompatibility, this is worthwhile to establish new foundations where safety and correctness are built in from the ground up rather than mitigated after the fact.
+## What is with the weird file extensions?
+According to the stage0 project (https://git.sr.ht/~oriansj/bootstrappable-wiki/blob/wiki/
+  stage0.md) the macro assembler source files should all have the extension `.M1`.
 
-## Current Status
+> File extensions are very important in stage0, they directly indicate the level of infrastructure
+> required to build them.
+> * HEX0 - indicates that the file can be built using the stage0 hex monitor or any other tool
+> that supports the minimal commented hex syntax
+> * HEX1 - indicates that the file also requires support for 1 character labels and a single size
+> (commonly 16bit) relative displacements.
+> * HEX2 - indicates that the file also requires support for long labels, 16bit absolute
+> displacements and 32bit pointers for manual object creation.
+> * M0/M1/S - indicates that the file can either be built by the platform specific M0 macro
+> assembler or the platform neutral M1 macro assembler
+> * c/h - indicates that the file contains C code
 
-The bootstrap chain is functional through hex2:
-- **hex0**: Minimal hex loader - reads hex bytes, stores in memory, executes on Ctrl-D
-- **hex1**: hex0 + single-character labels (`:x` to define, `@x` for branches, `$x` for jumps, `~x` for U-format, `!x` for I-format)
-- **hex2**: hex1 + multi-character labels (`:label_name`), relative pointers (`%label`, `&label`), word literals (`.XXXXXXXX`), alignment padding (`<`)
+## Disassembling for Reference
 
-Working chain: `hex0.bin → hex0.hex0 → hex1.hex0 → hex2.hex1 → program.hex2`
-
-## Development
-
-Tests are automated with `make`. QEMU is used for testing since there's no physical RISC-V machine available.
-
-**Always use `make` targets - never write shell commands by hand.** If a command you need isn't in the Makefile, add it as a new target.
-
-Available test targets:
-- `make test_echo` - test the echo program
-- `make test_hex0` - test hex0 built from assembly
-- `make test_hex0_handwritten` - test hex0 built from hex0.hex0
-- `make test_hex1` - test hex1 through full bootstrap chain (hex0.bin → hex0.hex0 → hex1.hex0 → echo.hex1)
-- `make test_hex2` - test hex2 through full bootstrap chain (hex0.bin → hex0.hex0 → hex1.hex0 → hex2.hex1 → echo.hex2)
-- `make test_m0` - test M0 macro assembler through full bootstrap chain
-- `make verify_hex0` - verify hex0.hex0 matches assembly output
-
-### Working with Claude Code
-
-When debugging or investigating issues:
-
-- Always read relevant files and run commands to understand the actual state before making suggestions
-- Don't guess or assume - verify with the files and tools in the project
-
-### hex0 File Formatting
-
-hex0 files follow the original stage0 project style (see https://github.com/oriansj/stage0-posix-riscv64):
-
-- `##` for copyright/license header
-- `#` for description comments and section headers
-- `# label:` for labels on their own line
-- `XX XX XX XX       # instruction` - hex bytes left-aligned, then `#` comment with instruction
-- `;` only for register usage blocks at the top
-- Use base instructions in comments, not pseudo-instructions (e.g., `addi a0, x0, 0` not `li a0, 0`)
-- Use hex for ASCII values in comments (e.g., `0x23` not `35` or `'#'`)
-
-Example:
-```
-# label:
-# Description of what this section does
-17 31 00 00       # auipc sp, 0x3
-13 01 01 18       # addi sp, sp, 384
-```
-
-After editing hex0 files, verify with `make verify_hex0`.
-
-### Disassembling for Reference
-
-To get assembly reference from a .s file:
+To get assembly reference from a .s file, roughly do this:
 
 ```sh
 riscv64-none-elf-as -march=rv64i -mabi=lp64 uart_echo/echo.s -o build/echo.o \

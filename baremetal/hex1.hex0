@@ -1,0 +1,360 @@
+## Copyright (C) 2026 Christian Westrom
+## This file is part of stage0.
+##
+## stage0 is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## stage0 is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with stage0.  If not, see <http://www.gnu.org/licenses/>.
+
+# hex1 - hand-written hex0 seed for RISC-V
+# Byte stream matches baremetal/GAS/hex1.s.
+# Instruction words are written in little-endian byte order for hex0.
+#
+# Register use:
+# s2: input buffer current position
+# s3: input buffer start (for rewinding)
+# s4: nibble toggle
+# s5: hold (first nibble of the current byte)
+# s6: instruction pointer in the output stream
+# s7: tempword used while packing immediates
+# s8: shift register of deferred label fixups
+# s9: input buffer end
+# s10: output buffer current position
+#
+# Memory layout at 0x80100000:
+#   table:         0x80100000
+#   input_buffer:  0x80100800
+#   output_buffer: 0x80110800
+#   stack_top:     0x80121800
+
+# _start:
+    37 01 04 00       # Build the high bits of stack_top
+    1B 01 11 09       # Fold in the next chunk of 0x80121800
+    13 11 D1 00       # Shift into the final 64-bit position
+    13 01 01 80       # Land exactly on stack_top = 0x80121800
+    37 09 08 00       # Build the high bits of input_buffer
+    1B 09 19 10       # Fold in the next chunk of 0x80100800
+    13 19 C9 00       # Shift into the final 64-bit position
+    13 09 09 80       # Land exactly on input_buffer = 0x80100800
+    93 09 09 00       # Remember the start of the input buffer in s3
+
+# read_input_loop:
+    EF 00 80 34       # Read one source byte from UART into a0
+    93 02 40 00       # Load Ctrl-D, our end-of-input marker
+    63 08 55 00       # Stop buffering once Ctrl-D arrives
+    23 00 A9 00       # Store the received byte into the input buffer
+    13 09 19 00       # Advance to the next input buffer slot
+    6F F0 DF FE       # Keep filling the input buffer
+
+# input_done:
+    93 0C 09 00       # Save the end of buffered input in s9
+    13 89 09 00       # Rewind s2 back to the start of the input buffer
+    13 0A F0 FF       # Initialize toggle to "expect first nibble"
+    93 0A 00 00       # Clear the held first nibble
+    13 0B 00 00       # Reset the output instruction pointer to zero
+    EF 00 40 04       # First pass records label addresses only
+    13 89 09 00       # Rewind to the start for the second pass
+    13 0A F0 FF       # Reinitialize the nibble toggle
+    93 0A 00 00       # Clear the held first nibble again
+    13 0B 00 00       # Reset the output instruction pointer again
+    93 0B 00 00       # Clear tempword scratch space
+    13 0C 00 00       # Clear the shift register scratch space
+    37 0D 08 00       # Build the high bits of output_buffer
+    1B 0D 1D 11       # Fold in the next chunk of 0x80110800
+    13 1D CD 00       # Shift into the final 64-bit position
+    13 0D 0D 80       # Land exactly on output_buffer = 0x80110800
+    EF 00 80 07       # Second pass emits the relocated output bytes
+    B7 02 08 00       # Rebuild the high bits of output_buffer in t0
+    9B 82 12 11       # Fold in the next chunk of 0x80110800
+    93 92 C2 00       # Shift into the final 64-bit position
+    93 82 02 80       # Land exactly on output_buffer = 0x80110800
+    67 80 02 00       # Jump into the assembled code we just emitted
+
+# First_pass:
+    13 01 81 FF       # Reserve one stack slot for ra
+    23 30 11 00       # Save the return address
+
+# First_pass_loop:
+    63 56 99 05       # Stop once the input cursor reaches the buffered end
+    EF 00 00 2C       # Fetch the next source byte
+    13 03 A0 03       # Load ':' to test for label definitions
+    63 14 65 00       # Skip StoreLabel unless this byte is ':'
+    EF 00 C0 30       # Record the current output IP for this label
+
+# First_pass_0:
+    13 03 10 02       # Load '!' to test for I-format label references
+    63 04 65 02       # Skip the following label character during pass 1
+    13 03 00 04       # Load '@' to test for B-format label references
+    63 00 65 02       # Skip the following label character during pass 1
+    13 03 40 02       # Load '$' to test for J-format label references
+    63 0C 65 00       # Skip the following label character during pass 1
+    13 03 E0 07       # Load '~' to test for U-format label references
+    63 08 65 00       # Skip the following label character during pass 1
+    93 05 F0 FF       # Tell DoByte to parse without emitting output
+    EF 00 00 19       # Let DoByte advance IP on completed bytes
+    6F F0 5F FC       # Continue scanning the input stream
+
+# Throwaway_token:
+    63 56 99 01       # Stop if the reference marker was the final byte
+    EF 00 00 28       # Consume the single-character label name
+    6F F0 9F FB       # Resume the first pass
+
+# First_pass_done:
+    83 30 01 00       # Restore the return address
+    13 01 81 00       # Release the stack slot
+    67 80 00 00       # Return to the caller
+
+# Second_pass:
+    13 01 81 FF       # Reserve one stack slot for ra
+    23 30 11 00       # Save the return address
+
+# Second_pass_loop:
+    63 5E 99 15       # Stop once the input cursor reaches the buffered end
+    EF 00 00 26       # Fetch the next source byte
+    13 03 A0 03       # Load ':' to test for label definitions
+    63 18 65 00       # Ordinary bytes fall through to Second_pass_0
+    63 56 99 15       # Stop if ':' was the last byte in the buffer
+    EF 00 00 25       # Drop the label character after ':'
+    6F F0 9F FE       # Continue without emitting anything for labels
+
+# Second_pass_0:
+    13 03 10 02       # Load '!' to test for I-format label references
+    63 04 65 02       # Dispatch to fixup handling for I-format references
+    13 03 00 04       # Load '@' to test for B-format label references
+    63 00 65 02       # Dispatch to fixup handling for B-format references
+    13 03 40 02       # Load '$' to test for J-format label references
+    63 0C 65 00       # Dispatch to fixup handling for J-format references
+    13 03 E0 07       # Load '~' to test for U-format label references
+    63 08 65 00       # Dispatch to fixup handling for U-format references
+    93 05 00 00       # Tell DoByte that pass 2 should emit output bytes
+    EF 00 80 12       # Convert this source character into output state
+    6F F0 DF FB       # Continue the second pass
+
+# UpdateShiftRegister:
+    93 05 05 00       # Preserve which relocation prefix we saw
+    EF 00 40 24       # Resolve and consume the referenced label character
+    03 35 05 00       # Load the label's recorded output IP
+    33 05 65 41       # Compute relative offset = target - current IP
+    13 03 10 02       # Load '!' for I-format relocation dispatch
+    63 80 65 02       # Patch an I-format immediate if requested
+    13 03 00 04       # Load '@' for B-format relocation dispatch
+    63 8A 65 02       # Patch a B-format immediate if requested
+    13 03 40 02       # Load '$' for J-format relocation dispatch
+    63 8A 65 06       # Patch a J-format immediate if requested
+    13 03 E0 07       # Load '~' for U-format relocation dispatch
+    63 88 65 0A       # Patch a U-format immediate if requested
+    6F F0 9F F8       # Ignore unknown prefixes and keep assembling
+
+# UpdateShiftRegister_I:
+    13 05 45 00       # Add 4 because '!' patches the ADDI after AUIPC
+    37 13 00 00       # Begin building the 0x00000fff mask
+    1B 03 F3 FF       # Finish the 12-bit low-immediate mask
+    33 73 65 00       # Keep only the low 12 bits of the offset
+    93 1B 43 01       # Move those bits into the I-format immediate field
+    33 4C 7C 01       # Merge this fixup into the shift register
+    6F F0 DF F6       # Continue the second pass
+
+# UpdateShiftRegister_B:
+    13 03 E0 01       # Load the mask for branch imm[4:1]
+    33 73 65 00       # Isolate imm[4:1] from the relative offset
+    93 12 73 00       # Move imm[4:1] into bits 11:8 of the instruction
+    13 03 00 7E       # Load the mask for branch imm[10:5]
+    33 73 65 00       # Isolate imm[10:5] from the relative offset
+    13 13 43 01       # Move imm[10:5] into bits 30:25 of the instruction
+    B3 E2 62 00       # Combine the low and middle branch immediate bits
+    37 13 00 00       # Begin building the 0x00000800 mask
+    1B 03 03 80       # Finish the mask for branch imm[11]
+    33 73 65 00       # Isolate imm[11] from the relative offset
+    13 53 43 00       # Move imm[11] into bit 7 of the instruction
+    B3 E2 62 00       # Combine imm[11] with the partial branch word
+    37 13 00 00       # Load the mask for branch imm[12]
+    33 73 65 00       # Isolate imm[12] from the relative offset
+    13 13 33 01       # Move imm[12] into bit 31 of the instruction
+    B3 EB 62 00       # Finish the packed B-format tempword
+    33 4C 7C 01       # Merge this fixup into the shift register
+    6F F0 5F F2       # Continue the second pass
+
+# UpdateShiftRegister_J:
+    13 03 E0 7F       # Load the mask for jump imm[10:1]
+    33 73 65 00       # Isolate imm[10:1] from the relative offset
+    93 12 43 01       # Move imm[10:1] into bits 30:21 of the instruction
+    37 13 00 00       # Begin building the 0x00000800 mask
+    1B 03 03 80       # Finish the mask for jump imm[11]
+    33 73 65 00       # Isolate imm[11] from the relative offset
+    13 13 93 00       # Move imm[11] into bit 20 of the instruction
+    B3 E2 62 00       # Combine imm[11] with the partial jump word
+    37 F3 0F 00       # Load the mask for jump imm[19:12]
+    33 73 65 00       # Isolate imm[19:12] from the relative offset
+    B3 E2 62 00       # Combine the middle jump immediate bits
+    37 03 10 00       # Load the mask for jump imm[20]
+    33 73 65 00       # Isolate imm[20] from the relative offset
+    13 13 B3 00       # Move imm[20] into bit 31 of the instruction
+    B3 EB 62 00       # Finish the packed J-format tempword
+    33 4C 7C 01       # Merge this fixup into the shift register
+    6F F0 1F EE       # Continue the second pass
+
+# UpdateShiftRegister_U:
+    B7 12 00 00       # Begin building the 0x00000800 threshold
+    9B 82 02 80       # Finish the threshold for U-immediate sign handling
+    37 13 00 00       # Begin building the 0x00000fff low-bit mask
+    1B 03 F3 FF       # Finish the low-bit mask
+    B7 03 10 00       # Begin building the 0xfffff000 upper-bit mask
+    9B 83 F3 FF       # Prepare the mask used for upper 20 bits only
+    93 93 C3 00       # Finish the 0xfffff000 upper-immediate mask
+    33 73 65 00       # Extract the low 12 bits of the relative offset
+    B3 7B 75 00       # Extract the upper 20 bits to become the U immediate
+    63 46 53 00       # If low bits are below 0x800, branch past the 0x1000 correction
+
+# UpdateShiftRegister_U_adjust:
+    B7 12 00 00       # Load the 0x1000 correction for signed low bits
+    BB 8B 72 01       # Add 0x1000 so the later ADDI sign-extension lands correctly
+
+# UpdateShiftRegister_U_small:
+    33 4C 7C 01       # Merge this fixup into the shift register
+    6F F0 9F EA       # Continue the second pass
+
+# Second_pass_done:
+    83 30 01 00       # Restore the return address
+    13 01 81 00       # Release the stack slot
+    67 80 00 00       # Return to the caller
+
+# DoByte:
+    13 01 81 FF       # Reserve one stack slot for ra
+    23 30 11 00       # Save the return address
+    EF 00 C0 04       # Convert the current ASCII byte into a hex nibble
+    63 4E 08 02       # Ignore whitespace, comments, and other non-hex input
+    63 18 0A 02       # If this is the first nibble, just remember it
+    63 90 05 02       # In pass 1, skip the actual output write
+    93 02 F0 0F       # Load the mask for the next shift-register byte
+    B3 72 5C 00       # Pull the low byte of pending fixup bits
+    13 5C 8C 00       # Shift the fixup register down by one byte
+    B3 C2 02 01       # XOR the low nibble with the pending fixup byte
+    13 93 4A 00       # Shift the held high nibble into position
+    33 85 62 00       # Form the final output byte
+    EF 00 00 14       # Append the byte to the output buffer
+
+# DoByte_1:
+    13 0B 1B 00       # Advance the output IP after completing one byte
+    93 0A 00 00       # Clear the held first nibble
+    6F 00 80 00       # Flip the nibble toggle and finish
+
+# DoByte_NotToggle:
+    93 0A 08 00       # Remember this nibble as the high half of the byte
+
+# DoByte_FlipToggle:
+    13 4A FA FF       # Swap between "first nibble" and "second nibble" state
+
+# DoByte_Done:
+    83 30 01 00       # Restore the return address
+    13 01 81 00       # Release the stack slot
+    67 80 00 00       # Return to the caller
+
+# hex:
+    13 01 01 FF       # Reserve two stack slots for ra and a1
+    23 30 11 00       # Save the return address
+    23 34 B1 00       # Save a1 across comment skipping
+    13 03 30 02       # Load '#' to recognize shell-style comments
+    63 06 65 06       # Skip to comment handling on '#'
+    13 03 B0 03       # Load ';' to recognize stage0-style comments
+    63 02 65 06       # Skip to comment handling on ';'
+    13 03 00 03       # Load '0' as the lowest valid hex character
+    63 4A 65 04       # Reject anything below '0'
+    13 03 A0 03       # Load ':' which is one past '9'
+    63 44 65 02       # Accept decimal digits '0' through '9'
+    13 03 10 04       # Load 'A' as the next valid hex range
+    63 42 65 04       # Reject punctuation between '9' and 'A'
+    13 03 70 04       # Load 'G' which is one past 'F'
+    63 48 65 02       # Accept uppercase hex digits 'A' through 'F'
+    13 03 10 06       # Load 'a' as the lowercase range start
+    63 4A 65 02       # Reject punctuation between 'F' and 'a'
+    13 03 70 06       # Load 'g' which is one past 'f'
+    63 4A 65 00       # Accept lowercase hex digits 'a' through 'f'
+    6F 00 80 02       # Treat everything else as non-hex input
+
+# ascii_num:
+    13 03 00 03       # Load the ASCII code for '0'
+    33 08 65 40       # Convert '0'..'9' into 0..9
+    6F 00 00 04       # Return with the decoded nibble
+
+# ascii_low:
+    13 03 70 05       # Load the bias that turns 'a' into 10
+    33 08 65 40       # Convert 'a'..'f' into 10..15
+    6F 00 40 03       # Return with the decoded nibble
+
+# ascii_high:
+    13 03 70 03       # Load the bias that turns 'A' into 10
+    33 08 65 40       # Convert 'A'..'F' into 10..15
+    6F 00 80 02       # Return with the decoded nibble
+
+# ascii_other:
+    13 08 F0 FF       # Report "not a hex digit" as -1 in a6
+    6F 00 00 02       # Return with the failure marker
+
+# ascii_comment:
+    63 5C 99 01       # Stop if the comment reaches the end of the buffer
+    EF 00 80 02       # Consume the next byte of the comment
+    13 03 D0 00       # Load carriage return as a line terminator
+    63 06 65 00       # End the comment on carriage return
+    13 03 A0 00       # Load line feed as the other terminator
+    E3 16 65 FE       # Keep discarding until a newline arrives
+
+# ascii_comment_done:
+    13 08 F0 FF       # Comments decode as "not a hex digit"
+
+# hex_return:
+    83 30 01 00       # Restore the return address
+    83 35 81 00       # Restore a1 for the caller
+    13 01 01 01       # Release the two stack slots
+    67 80 00 00       # Return to the caller
+
+# Read_byte:
+    03 05 09 00       # Load one buffered input byte into a0
+    13 09 19 00       # Advance the input cursor
+    67 80 00 00       # Return to the caller
+
+# read_uart:
+    B7 02 00 10       # Build the high bits of UART_LSR
+    9B 82 52 00       # Finish UART_LSR = 0x10000005
+
+# poll_rx:
+    03 85 02 00       # Read the UART line status register
+    13 75 15 00       # Keep only the data-ready bit
+    E3 0C 05 FE       # Spin until a received byte is available
+    B7 02 00 10       # Build the high bits of UART_BASE
+    03 85 02 00       # Read the received byte from 0x10000000
+    67 80 00 00       # Return the byte in a0
+
+# Get_table_target:
+    13 01 81 FF       # Reserve one stack slot for ra
+    23 30 11 00       # Save the return address
+    EF F0 DF FC       # Read the single-character label name
+    13 15 35 00       # Multiply it by 8 for an 8-byte table entry
+    B7 12 00 00       # Begin building the table base address
+    9B 82 12 80       # Fold in the remaining bits of 0x80100000
+    93 92 42 01       # Shift into the final 64-bit position
+    33 05 55 00       # Add the scaled label index to the table base
+    83 30 01 00       # Restore the return address
+    13 01 81 00       # Release the stack slot
+    67 80 00 00       # Return the table entry pointer in a0
+
+# StoreLabel:
+    13 01 81 FF       # Reserve one stack slot for ra
+    23 30 11 00       # Save the return address
+    EF F0 DF FC       # Resolve the label's table entry address
+    23 30 65 01       # Store the current output IP into that entry
+    83 30 01 00       # Restore the return address
+    13 01 81 00       # Release the stack slot
+    67 80 00 00       # Return to the caller
+
+# write_byte:
+    23 00 AD 00       # Store one output byte at the current buffer position
+    13 0D 1D 00       # Advance the output cursor
+    67 80 00 00       # Return to the caller

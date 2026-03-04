@@ -1,6 +1,9 @@
 .direnv
 .devenv
+.cursor
 
 build
-CLAUDE.md
-.cursor
+
+# For reference
+jonesforth
+original_stage0

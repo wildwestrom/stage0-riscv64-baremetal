@@ -1,0 +1,2547 @@
+## Copyright (C) 2026 Christian Westrom
+## Copyright (C) 2017 Jeremiah Orians
+## Copyright (C) 2021 Andrius Štikonas
+## Copyright (C) 2021 Gabriel Wicki
+## This file is part of stage0.
+##
+## stage0 is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## stage0 is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with stage0.  If not, see <http://www.gnu.org/licenses/>.
+
+; Bare metal M0 stage payload
+; Style adapted to match conventions in `M0_riscv64.hex2` from [github.com/oriansj/stage0-posix-riscv64](https://github.com/oriansj/stage0-posix-riscv64/blob/master/M0_riscv64.hex2)
+; Primary source: baremetal/GAS/M0.s and baremetal/GAS/M0_backend.s
+
+; Register use:
+; s1: heap pointer
+; s2: input cursor
+; s3: input end
+; s4: struct HEAD
+; s5: protected char
+; s6: scratch
+
+; Struct format: (size 32)
+; NEXT => 0
+; TYPE => 8
+; TEXT => 16
+; EXPRESSION => 24
+
+; Types
+; None => 0
+; MACRO => 1
+; STRING => 2
+
+:_start
+    # ADDIW SP, X0, 1029 ; Set up stack
+    1B015040
+    # SLLI SP, SP, 0X15 ; Set up stack
+    13115101
+    # ADDI S4, X0, 0 ; HEAD = NULL
+    130A0000
+    # ADDIW S1, X0, 1027 ; Heap starts here
+    9B043040
+    # SLLI S1, S1, 0X15 ; Heap starts here
+    93945401
+    # LUI S2, 0X1 ; Input buffer start
+    37190000
+    # ADDIW S2, S2, -2041 ; Input buffer start
+    1B097980
+    # SLLI S2, S2, 0X14 ; Input buffer start
+    13194901
+    # ADDI T1, S2, 0 ; Save start for later
+    13030900
+
+:read_input_loop
+    # JAL RA, READ_UART ; Read a character from UART
+    $read_uart EF000000
+    # ADDI T0, X0, 4 ; Ctrl-D
+    93024000
+    # BEQ A0, T0, INPUT_DONE ; Done reading input
+    @input_done 63005500
+    # SB A0, 0(S2) ; Store byte in buffer
+    2300A900
+    # ADDI S2, S2, 1 ; Advance buffer pointer
+    13091900
+    # JAL X0, READ_INPUT_LOOP ; Jump unconditionally to read_input_loop
+    $read_input_loop 6F000000
+
+:input_done
+    # ADDI S3, S2, 0 ; s3 = end of input buffer
+    93090900
+    # ADDI S2, T1, 0 ; s2 = start of input buffer
+    13090300
+    # ADDI A0, X0, 512 ; Allocate scratch
+    13050020
+    # JAL RA, MALLOC ; Get S pointer
+    $malloc EF000000
+    # ADDI S6, A0, 0 ; Save scratch pointer
+    130B0500
+    # JAL RA, TOKENIZE_LINE ; Get all lines
+    $Tokenize_Line EF000000
+    # ADDI A0, S4, 0 ; Prepare for Reverse_List
+    13050A00
+    # JAL RA, REVERSE_LIST ; Correct order
+    $Reverse_List EF000000
+    # ADDI S4, A0, 0 ; Update HEAD
+    130A0500
+    # JAL RA, IDENTIFY_MACROS ; Find the DEFINEs
+    $Identify_Macros EF000000
+    # JAL RA, LINE_MACRO ; Apply the DEFINEs
+    $Line_Macro EF000000
+    # JAL RA, PROCESS_STRING ; Handle strings
+    $Process_String EF000000
+    # JAL RA, EVAL_IMMEDIATES ; Handle numbers
+    $Eval_Immediates EF000000
+    # JAL RA, PRESERVE_OTHER ; Collect the remaining
+    $Preserve_Other EF000000
+    # JAL RA, SERIALIZE_EXPRESSIONS ; Build text stream for backend assembler
+    $Serialize_Expressions EF000000
+    # ADDI A2, S1, 0 ; Heap pointer for backend label allocations
+    13860400
+    # JAL RA, M0_BACKEND_ASSEMBLE_AND_EXEC ; Never returns on success
+    $M0_backend_assemble_and_exec EF000000
+    # JAL X0, FAIL ; Jump unconditionally to Fail
+    $Fail 6F000000
+
+:read_uart
+    # LUI T0, 0X10000 ; UART_LSR
+    B7020010
+    # ADDIW T0, T0, 5 ; UART_LSR
+    9B825200
+
+:poll_rx
+    # LB A0, 0(T0) ; Read LSR
+    03850200
+    # ANDI A0, A0, 1 ; Check bit 0 (Data Ready)
+    13751500
+    # BEQ A0, X0, POLL_RX ; If no data ready, keep polling
+    @poll_rx 63000500
+    # LUI T0, 0X10000 ; UART_BASE
+    B7020010
+    # LB A0, 0(T0) ; Read received byte
+    03850200
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:Tokenize_Line
+    # ADDI SP, SP, -8 ; allocate stack
+    130181FF
+    # SD RA, 0(SP) ; protect ra
+    23301100
+
+:restart
+    # JAL RA, FGETC ; Read a char
+    $fgetc EF000000
+    # ADDI T0, X0, -4 ; EOF
+    9302C0FF
+    # BEQ A0, T0, DONE ; File is collected
+    @done 63005500
+    # ADDI A2, A0, 0 ; Protect C
+    13060500
+    # JAL RA, ISCOMMENTSTARTER ; Check for comments
+    $IsCommentStarter EF000000
+    # ADDI T0, X0, 1 ; If comment
+    93021000
+    # BEQ A0, T0, PURGE_LINECOMMENT ; try again
+    @Purge_LineComment 63005500
+    # ADDI A0, A2, 0 ; Put C in place for check
+    13050600
+    # JAL RA, ISTERMINATOR ; Check for terminators
+    $IsTerminator EF000000
+    # ADDI T0, X0, 1 ; If terminator
+    93021000
+    # BEQ A0, T0, RESTART ; try again
+    @restart 63005500
+    # ADDI A0, X0, 32 ; malloc struct P
+    13050002
+    # JAL RA, MALLOC ; Get pointer to P
+    $malloc EF000000
+    # ADDI A3, A0, 0 ; Protect P
+    93060500
+    # SD S4, 0(A3) ; P->NEXT = HEAD
+    23B04601
+    # SD X0, 8(A3) ; P->TYPE = None
+    23B40600
+    # SD X0, 16(A3) ; P->TEXT = NULL
+    23B80600
+    # SD X0, 24(A3) ; P->EXPRESSION = NULL
+    23BC0600
+    # ADDI S4, A3, 0 ; HEAD = P
+    138A0600
+    # ADDI A0, A2, 0 ; Put C in place for check
+    13050600
+    # JAL RA, ISSTRINGDELIMITER ; Check for string char
+    $IsStringDelimiter EF000000
+    # ADDI T0, X0, 1 ; If string char
+    93021000
+    # BEQ A0, T0, STORE_STRING ; Get string
+    @Store_String 63005500
+    # JAL RA, STORE_ATOM ; Get whole token
+    $Store_Atom EF000000
+    # JAL X0, RESTART ; Jump unconditionally to restart
+    $restart 6F000000
+
+:done
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # ADDI SP, SP, 8 ; deallocate stack
+    13018100
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:IsCommentStarter
+    # ADDI T0, X0, 35 ; '#'
+    93023002
+    # BEQ A0, T0, ISCOMMENTSTARTER_TRUE ; Branch when condition is satisfied
+    @IsCommentStarter_True 63005500
+    # ADDI T0, X0, 59 ; ';'
+    9302B003
+    # BEQ A0, T0, ISCOMMENTSTARTER_TRUE ; Branch when condition is satisfied
+    @IsCommentStarter_True 63005500
+    # ADDI A0, X0, 0 ; Load immediate constant
+    13050000
+    # JALR X0, 0(RA) ; Return to caller
+    67800000
+
+:IsCommentStarter_True
+    # ADDI A0, X0, 1 ; Load immediate constant
+    13051000
+    # JALR X0, 0(RA) ; Return to caller
+    67800000
+
+:IsTerminator
+    # ADDI T0, X0, 10 ; '\n'
+    9302A000
+    # BEQ A0, T0, ISTERMINATOR_TRUE ; Branch when condition is satisfied
+    @IsTerminator_True 63005500
+    # ADDI T0, X0, 9 ; '\t'
+    93029000
+    # BEQ A0, T0, ISTERMINATOR_TRUE ; Branch when condition is satisfied
+    @IsTerminator_True 63005500
+    # ADDI T0, X0, 32 ; ' '
+    93020002
+    # BEQ A0, T0, ISTERMINATOR_TRUE ; Branch when condition is satisfied
+    @IsTerminator_True 63005500
+    # ADDI A0, X0, 0 ; Load immediate constant
+    13050000
+    # JALR X0, 0(RA) ; Return to caller
+    67800000
+
+:IsTerminator_True
+    # ADDI A0, X0, 1 ; Load immediate constant
+    13051000
+    # JALR X0, 0(RA) ; Return to caller
+    67800000
+
+:IsStringDelimiter
+    # ADDI T0, X0, 34 ; '"'
+    93022002
+    # BEQ A0, T0, ISSTRINGDELIMITER_TRUE ; Branch when condition is satisfied
+    @IsStringDelimiter_True 63005500
+    # ADDI T0, X0, 39 ; '\''
+    93027002
+    # BEQ A0, T0, ISSTRINGDELIMITER_TRUE ; Branch when condition is satisfied
+    @IsStringDelimiter_True 63005500
+    # ADDI A0, X0, 0 ; Load immediate constant
+    13050000
+    # JALR X0, 0(RA) ; Return to caller
+    67800000
+
+:IsStringDelimiter_True
+    # ADDI A0, X0, 1 ; Load immediate constant
+    13051000
+    # JALR X0, 0(RA) ; Return to caller
+    67800000
+
+:Purge_LineComment
+    # JAL RA, FGETC ; Get a char
+    $fgetc EF000000
+    # ADDI T0, X0, 10 ; While not LF
+    9302A000
+    # BNE A0, T0, PURGE_LINECOMMENT ; Keep reading
+    @Purge_LineComment 63105500
+    # JAL X0, RESTART ; Jump unconditionally to restart
+    $restart 6F000000
+
+:Store_String
+    # ADDI SP, SP, -24 ; allocate stack
+    130181FE
+    # SD A1, 0(SP) ; protect a1
+    2330B100
+    # SD A2, 8(SP) ; protect a2
+    2334C100
+    # SD A3, 16(SP) ; protect a3
+    2338D100
+    # ADDI A0, X0, 2 ; Using TYPE STRING
+    13052000
+    # SD A0, 8(A3) ; HEAD->TYPE = STRING
+    23B4A600
+    # ADDI A1, A2, 0 ; Protect terminator
+    93050600
+    # ADDI A3, S6, 0 ; Protect string pointer
+    93060B00
+
+:Store_String_Loop
+    # SB A2, 0(A3) ; write byte
+    2380C600
+    # JAL RA, FGETC ; read next char
+    $fgetc EF000000
+    # ADDI A2, A0, 0 ; Update C
+    13060500
+    # ADDI A3, A3, 1 ; STRING = STRING + 1
+    93861600
+    # BNE A1, A2, STORE_STRING_LOOP ; Keep looping unless we hit terminator
+    @Store_String_Loop 6390C500
+    # SB X0, 0(A3) ; terminate scratch string
+    23800600
+    # ADDI A0, S6, 0 ; Prepare the string in scratch
+    13050B00
+    # JAL RA, STRING_LENGTH ; Calculate length
+    $string_length EF000000
+    # ADDI A0, A0, 1 ; Add 1 for 0 terminator
+    13051500
+    # JAL RA, MALLOC ; Allocate memory
+    $malloc EF000000
+    # LD A3, 16(SP) ; restore a3 (HEAD)
+    83360101
+    # SD A0, 16(A3) ; HEAD->TEXT = STRING
+    23B8A600
+    # JAL RA, COPY_STRING ; Copy the string
+    $copy_string EF000000
+    # LD A1, 0(SP) ; restore a1
+    83350100
+    # LD A2, 8(SP) ; restore a2
+    03368100
+    # ADDI SP, SP, 24 ; deallocate stack
+    13018101
+    # JAL X0, RESTART ; Jump unconditionally to restart
+    $restart 6F000000
+
+:copy_string
+    # ADDI SP, SP, -24 ; allocate stack
+    130181FE
+    # SD RA, 0(SP) ; protect ra
+    23301100
+    # SD A1, 8(SP) ; protect a1
+    2334B100
+    # SD A2, 16(SP) ; protect a2
+    2338C100
+    # ADDI A2, S6, 0 ; Get S
+    13060B00
+
+:copy_string_loop
+    # LBU A1, 0(A2) ; S[0]
+    83450600
+    # BEQ A1, X0, COPY_STRING_DONE ; Check if we are done
+    @copy_string_done 63800500
+    # SB A1, 0(A0) ; Copy char
+    2300B500
+    # ADDI A2, A2, 1 ; S = S + 1
+    13061600
+    # ADDI A0, A0, 1 ; T = T + 1
+    13051500
+    # JAL X0, COPY_STRING_LOOP ; Keep going
+    $copy_string_loop 6F000000
+
+:copy_string_done
+    # SB X0, 0(A0) ; write 0 terminator
+    23000500
+    # JAL RA, CLEARSCRATCH ; Clear scratch
+    $ClearScratch EF000000
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # LD A1, 8(SP) ; restore a1
+    83358100
+    # LD A2, 16(SP) ; restore a2
+    03360101
+    # ADDI SP, SP, 24 ; deallocate stack
+    13018101
+    # JALR X0, 0(RA) ; Return to caller
+    67800000
+
+:ClearScratch
+    # ADDI SP, SP, -24 ; allocate stack
+    130181FE
+    # SD RA, 0(SP) ; protect ra
+    23301100
+    # SD A0, 8(SP) ; protect a0
+    2334A100
+    # SD A1, 16(SP) ; protect a1
+    2338B100
+    # ADDI A0, S6, 0 ; Prepare scratch
+    13050B00
+    # ADDI A1, X0, 512 ; scratch size in bytes
+    93050020
+
+:ClearScratch_loop
+    # SB X0, 0(A0) ; Write zero: s[i] = 0
+    23000500
+    # ADDI A0, A0, 1 ; Increment: i = i + 1
+    13051500
+    # ADDI A1, A1, -1 ; remaining bytes--
+    9385F5FF
+    # BNE A1, X0, CLEARSCRATCH_LOOP ; Keep looping
+    @ClearScratch_loop 63900500
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # LD A0, 8(SP) ; restore a0
+    03358100
+    # LD A1, 16(SP) ; restore a1
+    83350101
+    # ADDI SP, SP, 24 ; deallocate stack
+    13018101
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:Store_Atom
+    # ADDI SP, SP, -24 ; allocate stack
+    130181FE
+    # SD RA, 0(SP) ; protect ra
+    23301100
+    # SD A2, 8(SP) ; protect a2
+    2334C100
+    # SD A3, 16(SP) ; protect a3
+    2338D100
+    # ADDI A3, S6, 0 ; Protect string pointer
+    93060B00
+
+:Store_Atom_loop
+    # SB A2, 0(A3) ; write byte
+    2380C600
+    # JAL RA, FGETC ; read next char
+    $fgetc EF000000
+    # ADDI A2, A0, 0 ; Update C
+    13060500
+    # ADDI A3, A3, 1 ; STRING = STRING + 1
+    93861600
+    # JAL RA, ISTERMINATOR ; Check for terminators
+    $IsTerminator EF000000
+    # BEQ A0, X0, STORE_ATOM_LOOP ; Loop if not "\n\t "
+    @Store_Atom_loop 63000500
+    # SB X0, 0(A3) ; terminate scratch string
+    23800600
+    # ADDI A0, S6, 0 ; Prepare the string in scratch
+    13050B00
+    # JAL RA, STRING_LENGTH ; Calculate length
+    $string_length EF000000
+    # ADDI A0, A0, 1 ; Add 1 for 0 terminator
+    13051500
+    # JAL RA, MALLOC ; Allocate memory
+    $malloc EF000000
+    # LD A3, 16(SP) ; restore a3 (HEAD)
+    83360101
+    # SD A0, 16(A3) ; HEAD->TEXT = STRING
+    23B8A600
+    # JAL RA, COPY_STRING ; Copy the string
+    $copy_string EF000000
+    # ADDI A0, A3, 0 ; Return HEAD
+    13850600
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # LD A2, 8(SP) ; restore a2
+    03368100
+    # ADDI SP, SP, 24 ; deallocate stack
+    13018101
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:Reverse_List
+    # ADDI SP, SP, -16 ; allocate stack
+    130101FF
+    # SD A1, 0(SP) ; protect a1
+    2330B100
+    # SD A2, 8(SP) ; protect a2
+    2334C100
+    # ADDI A1, A0, 0 ; Set HEAD
+    93050500
+    # ADDI A0, X0, 0 ; ROOT = NULL
+    13050000
+
+:Reverse_List_Loop
+    # BEQ A1, X0, REVERSE_LIST_DONE ; Stop if HEAD == NULL
+    @Reverse_List_Done 63800500
+    # LD A2, 0(A1) ; NEXT = HEAD->NEXT
+    03B60500
+    # SD A0, 0(A1) ; HEAD->NEXT = ROOT
+    23B0A500
+    # ADDI A0, A1, 0 ; ROOT = HEAD
+    13850500
+    # ADDI A1, A2, 0 ; HEAD = NEXT
+    93050600
+    # JAL X0, REVERSE_LIST_LOOP ; Continue looping
+    $Reverse_List_Loop 6F000000
+
+:Reverse_List_Done
+    # LD A1, 0(SP) ; restore a1
+    83350100
+    # LD A2, 8(SP) ; restore a2
+    03368100
+    # ADDI SP, SP, 16 ; deallocate stack
+    13010101
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:Identify_Macros
+    # ADDI SP, SP, -24 ; allocate stack
+    130181FE
+    # SD RA, 0(SP) ; protect ra
+    23301100
+    # SD A0, 8(SP) ; protect a0
+    2334A100
+    # SD A2, 16(SP) ; protect a2
+    2338C100
+    # ADDI A2, A0, 0 ; I = HEAD
+    13060500
+
+:Identify_Macros_Loop
+    # LD A0, 16(A2) ; I->TEXT
+    03350601
+    # JAL RA, MATCH_DEFINE ; IF "DEFINE" == I->TEXT
+    $match_DEFINE EF000000
+    # BNE A0, X0, IDENTIFY_MACROS_NEXT ; Check if we got macro
+    @Identify_Macros_Next 63100500
+    # ADDI A0, X0, 1 ; a0 = MACRO
+    13051000
+    # SD A0, 8(A2) ; I->TYPE = MACRO
+    2334A600
+    # LD A0, 0(A2) ; I->NEXT
+    03350600
+    # LD A0, 16(A0) ; I->NEXT->TEXT
+    03350501
+    # SD A0, 16(A2) ; I->TEXT = I->NEXT->TEXT
+    2338A600
+    # LD A0, 0(A2) ; I->NEXT
+    03350600
+    # LD A0, 0(A0) ; I->NEXT->NEXT
+    03350500
+    # LD A0, 16(A0) ; I->NEXT->NEXT->TEXT
+    03350501
+    # SD A0, 24(A2) ; I->EXPRESSION = I->NEXT->NEXT->TEXT
+    233CA600
+    # LD A0, 0(A2) ; I->NEXT
+    03350600
+    # LD A0, 0(A0) ; I->NEXT->NEXT
+    03350500
+    # LD A0, 0(A0) ; I->NEXT->NEXT->NEXT
+    03350500
+    # SD A0, 0(A2) ; I->NEXT = I->NEXT->NEXT->NEXT
+    2330A600
+
+:Identify_Macros_Next
+    # LD A2, 0(A2) ; I = I->NEXT
+    03360600
+    # BNE A2, X0, IDENTIFY_MACROS_LOOP ; Check if we are done
+    @Identify_Macros_Loop 63100600
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # LD A0, 8(SP) ; restore a0
+    03358100
+    # LD A2, 16(SP) ; restore a2
+    03360101
+    # ADDI SP, SP, 24 ; deallocate stack
+    13018101
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:match_DEFINE
+    # LBU T0, 0(A0) ; Load value from memory
+    83420500
+    # ADDI T1, X0, 68 ; Load immediate constant
+    13034004
+    # BNE T0, T1, MATCH_DEFINE_FALSE ; Branch when condition is satisfied
+    @match_DEFINE_False 63906200
+    # LBU T0, 1(A0) ; Load value from memory
+    83421500
+    # ADDI T1, X0, 69 ; Load immediate constant
+    13035004
+    # BNE T0, T1, MATCH_DEFINE_FALSE ; Branch when condition is satisfied
+    @match_DEFINE_False 63906200
+    # LBU T0, 2(A0) ; Load value from memory
+    83422500
+    # ADDI T1, X0, 70 ; Load immediate constant
+    13036004
+    # BNE T0, T1, MATCH_DEFINE_FALSE ; Branch when condition is satisfied
+    @match_DEFINE_False 63906200
+    # LBU T0, 3(A0) ; Load value from memory
+    83423500
+    # ADDI T1, X0, 73 ; Load immediate constant
+    13039004
+    # BNE T0, T1, MATCH_DEFINE_FALSE ; Branch when condition is satisfied
+    @match_DEFINE_False 63906200
+    # LBU T0, 4(A0) ; Load value from memory
+    83424500
+    # ADDI T1, X0, 78 ; Load immediate constant
+    1303E004
+    # BNE T0, T1, MATCH_DEFINE_FALSE ; Branch when condition is satisfied
+    @match_DEFINE_False 63906200
+    # LBU T0, 5(A0) ; Load value from memory
+    83425500
+    # ADDI T1, X0, 69 ; Load immediate constant
+    13035004
+    # BNE T0, T1, MATCH_DEFINE_FALSE ; Branch when condition is satisfied
+    @match_DEFINE_False 63906200
+    # LBU T0, 6(A0) ; Load value from memory
+    83426500
+    # BNE T0, X0, MATCH_DEFINE_FALSE ; Branch when condition is satisfied
+    @match_DEFINE_False 63900200
+    # ADDI A0, X0, 0 ; Load immediate constant
+    13050000
+    # JALR X0, 0(RA) ; Return to caller
+    67800000
+
+:match_DEFINE_False
+    # ADDI A0, X0, 1 ; Load immediate constant
+    13051000
+    # JALR X0, 0(RA) ; Return to caller
+    67800000
+
+:match
+    # ADDI SP, SP, -24 ; allocate stack
+    130181FE
+    # SD A1, 0(SP) ; protect a1
+    2330B100
+    # SD A2, 8(SP) ; protect a2
+    2334C100
+    # SD A3, 16(SP) ; protect a3
+    2338D100
+    # ADDI A2, A0, 0 ; S1 in place
+    13060500
+    # ADDI A3, A1, 0 ; S2 in place
+    93860500
+
+:match_Loop
+    # LBU A0, 0(A2) ; S1[i]
+    03450600
+    # LBU A1, 0(A3) ; S2[i]
+    83C50600
+    # BNE A0, A1, MATCH_FALSE ; Check if they match
+    @match_False 6310B500
+    # ADDI A2, A2, 1 ; S1 = S1 + 1
+    13061600
+    # ADDI A3, A3, 1 ; S2 = S2 + 1
+    93861600
+    # BEQ A0, X0, MATCH_DONE ; Match if we reached end of string
+    @match_Done 63000500
+    # JAL X0, MATCH_LOOP ; Otherwise keep looping
+    $match_Loop 6F000000
+
+:match_False
+    # ADDI A0, X0, 1 ; Return false
+    13051000
+
+:match_Done
+    # LD A1, 0(SP) ; restore a1
+    83350100
+    # LD A2, 8(SP) ; restore a2
+    03368100
+    # LD A3, 16(SP) ; restore a3
+    83360101
+    # ADDI SP, SP, 24 ; deallocate stack
+    13018101
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:Line_Macro
+    # ADDI SP, SP, -32 ; allocate stack
+    130101FE
+    # SD RA, 0(SP) ; protect ra
+    23301100
+    # SD A0, 8(SP) ; protect a0
+    2334A100
+    # SD A1, 16(SP) ; protect a1
+    2338B100
+    # SD A2, 24(SP) ; protect a2
+    233CC100
+
+:Line_Macro_Loop
+    # LD A1, 8(A0) ; I->TYPE
+    83358500
+    # ADDI T0, X0, 1 ; t0 = MACRO
+    93021000
+    # BNE A1, T0, LINE_MACRO_NEXT ; Move on unless I->TYPE == MACRO
+    @Line_Macro_Next 63905500
+    # LD A1, 16(A0) ; I->TEXT
+    83350501
+    # LD A2, 24(A0) ; I->EXPRESSION
+    03368501
+    # LD A0, 0(A0) ; I->NEXT
+    03350500
+    # JAL RA, SET_EXPRESSION ; Apply it
+    $Set_Expression EF000000
+    # JAL X0, LINE_MACRO_LOOP ; Move on to next
+    $Line_Macro_Loop 6F000000
+
+:Line_Macro_Next
+    # LD A0, 0(A0) ; I->NEXT
+    03350500
+    # BNE A0, X0, LINE_MACRO_LOOP ; Check if we are done
+    @Line_Macro_Loop 63100500
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # LD A0, 8(SP) ; restore a0
+    03358100
+    # LD A1, 16(SP) ; restore a1
+    83350101
+    # LD A2, 24(SP) ; restore a2
+    03368101
+    # ADDI SP, SP, 32 ; deallocate stack
+    13010102
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:Set_Expression
+    # ADDI SP, SP, -40 ; allocate stack
+    130181FD
+    # SD RA, 0(SP) ; protect ra
+    23301100
+    # SD A0, 8(SP) ; protect a0
+    2334A100
+    # SD A1, 16(SP) ; protect a1
+    2338B100
+    # SD A2, 24(SP) ; protect a2
+    233CC100
+    # SD A3, 32(SP) ; protect a3
+    2330D102
+    # ADDI A3, A0, 0 ; Set I
+    93060500
+
+:Set_Expression_Loop
+    # LD A0, 8(A3) ; I->TYPE
+    03B58600
+    # ADDI T0, X0, 1 ; t0 = MACRO
+    93021000
+    # BEQ A0, T0, SET_EXPRESSION_NEXT ; If MACRO == I->Type then ignore and move on
+    @Set_Expression_Next 63005500
+    # LD A0, 16(A3) ; I->TEXT
+    03B50601
+    # JAL RA, MATCH ; Check for match
+    $match EF000000
+    # BNE A0, X0, SET_EXPRESSION_NEXT ; Check next if does not match
+    @Set_Expression_Next 63100500
+    # SD A2, 24(A3) ; I->EXPRESSION = EXP
+    23BCC600
+
+:Set_Expression_Next
+    # LD A3, 0(A3) ; I = I->NEXT
+    83B60600
+    # BNE A3, X0, SET_EXPRESSION_LOOP ; Check if we are done
+    @Set_Expression_Loop 63900600
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # LD A0, 8(SP) ; restore a0
+    03358100
+    # LD A1, 16(SP) ; restore a1
+    83350101
+    # LD A2, 24(SP) ; restore a2
+    03368101
+    # LD A3, 32(SP) ; restore a3
+    83360102
+    # ADDI SP, SP, 40 ; deallocate stack
+    13018102
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:Process_String
+    # ADDI SP, SP, -40 ; allocate stack
+    130181FD
+    # SD RA, 0(SP) ; protect ra
+    23301100
+    # SD A0, 8(SP) ; protect a0
+    2334A100
+    # SD A1, 16(SP) ; protect a1
+    2338B100
+    # SD A2, 24(SP) ; protect a2
+    233CC100
+    # SD A3, 32(SP) ; protect a3
+    2330D102
+    # ADDI A2, A0, 0 ; I = HEAD
+    13060500
+
+:Process_String_loop
+    # LD A0, 8(A2) ; I->TYPE
+    03358600
+    # ADDI T0, X0, 2 ; t0 = STRING
+    93022000
+    # BNE A0, T0, PROCESS_STRING_NEXT ; Skip to next
+    @Process_String_Next 63105500
+    # LD A1, 16(A2) ; I->TEXT
+    83350601
+    # LBU A0, 0(A1) ; I->TEXT[0]
+    03C50500
+    # ADDI T0, X0, 39 ; t0 = \'
+    93027002
+    # BNE A0, T0, PROCESS_STRING_RAW ; Deal with '"'
+    @Process_String_Raw 63105500
+    # ADDI A1, A1, 1 ; I->TEXT + 1
+    93851500
+    # SD A1, 24(A2) ; I->EXPRESSION = I->TEXT + 1
+    233CB600
+    # JAL X0, PROCESS_STRING_NEXT ; Move on to next
+    $Process_String_Next 6F000000
+
+:Process_String_Raw
+    # ADDI A0, A1, 0 ; I->TEXT
+    13850500
+    # JAL RA, STRING_LENGTH ; Get length of I->TEXT
+    $string_length EF000000
+    # SRLI A0, A0, 0X2 ; LENGTH = LENGTH >> 2
+    13552500
+    # ADDI A0, A0, 1 ; LENGTH = LENGTH + 1
+    13051500
+    # SLLI A0, A0, 0X3 ; LENGTH = LENGTH << 3
+    13153500
+    # JAL RA, MALLOC ; Get string
+    $malloc EF000000
+    # ADDI A3, A1, 0 ; S = I->TEXT
+    93860500
+    # ADDI A3, A3, 1 ; S = S + 1
+    93861600
+    # SD A0, 24(A2) ; I->EXPRESSION = hexify
+    233CA600
+    # ADDI A1, A0, 0 ; Put hexify buffer in a1
+    93050500
+
+:Process_String_Raw_Loop
+    # LBU A0, 0(A3) ; Read 1 character
+    03C50600
+    # ADDI A3, A3, 1 ; S = S + 1
+    93861600
+    # ADDI S5, A0, 0 ; Protect character
+    930A0500
+    # JAL RA, HEX8 ; write them all
+    $hex8 EF000000
+    # ADDI A0, S5, 0 ; Restore character
+    13850A00
+    # BNE A0, X0, PROCESS_STRING_RAW_LOOP ; Keep looping
+    @Process_String_Raw_Loop 63100500
+
+:Process_String_Next
+    # LD A2, 0(A2) ; I = I->NEXT
+    03360600
+    # BNE A2, X0, PROCESS_STRING_LOOP ; Check if we are done
+    @Process_String_loop 63100600
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # LD A0, 8(SP) ; restore a0
+    03358100
+    # LD A1, 16(SP) ; restore a1
+    83350101
+    # LD A2, 24(SP) ; restore a2
+    03368101
+    # LD A3, 32(SP) ; restore a3
+    83360102
+    # ADDI SP, SP, 40 ; deallocate stack
+    13018102
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:string_length
+    # ADDI SP, SP, -16 ; allocate stack
+    130101FF
+    # SD A1, 0(SP) ; protect a1
+    2330B100
+    # SD A2, 8(SP) ; protect a2
+    2334C100
+    # ADDI A1, A0, 0 ; Set S
+    93050500
+    # ADDI A2, X0, 0 ; INDEX = 0
+    13060000
+
+:string_length_loop
+    # ADD T0, A1, A2 ; S + INDEX
+    B382C500
+    # LBU A0, 0(T0) ; S[INDEX]
+    03C50200
+    # BEQ A0, X0, STRING_LENGTH_DONE ; Check if we are done
+    @string_length_done 63000500
+    # ADDI A2, A2, 1 ; INDEX = INDEX + 1
+    13061600
+    # JAL X0, STRING_LENGTH_LOOP ; Keep going
+    $string_length_loop 6F000000
+
+:string_length_done
+    # ADDI A0, A2, 0 ; return INDEX
+    13050600
+    # LD A1, 0(SP) ; restore a1
+    83350100
+    # LD A2, 8(SP) ; restore a2
+    03368100
+    # ADDI SP, SP, 16 ; deallocate stack
+    13010101
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:Eval_Immediates
+    # ADDI SP, SP, -40 ; allocate stack
+    130181FD
+    # SD RA, 0(SP) ; protect ra
+    23301100
+    # SD A0, 8(SP) ; protect a0
+    2334A100
+    # SD A1, 16(SP) ; protect a1
+    2338B100
+    # SD A2, 24(SP) ; protect a2
+    233CC100
+    # SD A3, 32(SP) ; protect a3
+    2330D102
+    # ADDI A3, A0, 0 ; I = HEAD
+    93060500
+
+:Eval_Immediates_Loop
+    # LD A0, 8(A3) ; I->TYPE
+    03B58600
+    # ADDI T0, X0, 1 ; t0 = MACRO
+    93021000
+    # BEQ A0, T0, EVAL_IMMEDIATES_NEXT ; Skip to next if I->TYPE == MACRO
+    @Eval_Immediates_Next 63005500
+    # LD A0, 24(A3) ; I->EXPRESSION
+    03B58601
+    # BNE A0, X0, EVAL_IMMEDIATES_NEXT ; Skip to next if NULL == I->EXPRESSION
+    @Eval_Immediates_Next 63100500
+    # LD A0, 16(A3) ; I->TEXT
+    03B50601
+    # LBU A1, 0(A0) ; I->TEXT[0]
+    83450500
+    # ADDI A0, A0, 1 ; I->TEXT + 1
+    13051500
+    # LBU A2, 0(A0) ; I->TEXT[1]
+    03460500
+    # JAL RA, NUMERATE_STRING ; Convert string to INT
+    $numerate_string EF000000
+    # BNE A0, X0, EVAL_IMMEDIATES_VALUE ; Has a value IF 0 != numerate_string(I->TEXT + 1)
+    @Eval_Immediates_value 63100500
+    # ADDI T0, X0, 48 ; If '0' = I->TEXT[1]
+    93020003
+    # BNE A2, T0, EVAL_IMMEDIATES_NEXT ; Skip to next
+    @Eval_Immediates_Next 63105600
+
+:Eval_Immediates_value
+    # JAL RA, EXPRESS_NUMBER ; Convert value to hex string
+    $express_number EF000000
+    # SD A0, 24(A3) ; I->EXPRESSION = express_number(value, I-TEXT[0])
+    23BCA600
+
+:Eval_Immediates_Next
+    # LD A3, 0(A3) ; I = I->NEXT
+    83B60600
+    # BNE A3, X0, EVAL_IMMEDIATES_LOOP ; Check if we are done
+    @Eval_Immediates_Loop 63900600
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # LD A0, 8(SP) ; restore a0
+    03358100
+    # LD A1, 16(SP) ; restore a1
+    83350101
+    # LD A2, 24(SP) ; restore a2
+    03368101
+    # LD A3, 32(SP) ; restore a3
+    83360102
+    # ADDI SP, SP, 40 ; deallocate stack
+    13018102
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:numerate_string
+    # ADDI SP, SP, -24 ; allocate stack
+    130181FE
+    # SD A1, 0(SP) ; protect a1
+    2330B100
+    # SD A2, 8(SP) ; protect a2
+    2334C100
+    # SD A3, 16(SP) ; protect a3
+    2338D100
+    # ADDI A1, A0, 0 ; put S in correct place
+    93050500
+    # ADDI A0, X0, 0 ; Initialize to Zero
+    13050000
+
+:numerate_string_loop
+    # ADDI T0, A1, 1 ; S + 1
+    93821500
+    # LBU A2, 0(T0) ; S[1]
+    03C60200
+    # ADDI T0, X0, 120 ; 'x'
+    93028007
+    # BEQ A2, T0, NUMERATE_HEX ; Deal with hex_input
+    @numerate_hex 63005600
+    # ADDI A3, X0, 0 ; Assume no negation
+    93060000
+    # LBU A2, 0(A1) ; S[0]
+    03C60500
+    # ADDI T0, X0, 45 ; '-'
+    9302D002
+    # BNE A2, T0, NUMERATE_DECIMAL ; Skip negation
+    @numerate_decimal 63105600
+    # ADDI A3, X0, 1 ; Set FLAG
+    93061000
+    # ADDI A1, A1, 1 ; S = S + 1
+    93851500
+
+:numerate_decimal
+    # LBU A2, 0(A1) ; S[i]
+    03C60500
+    # BEQ A2, X0, NUMERATE_DECIMAL_DONE ; We are done if NULL == S[i]
+    @numerate_decimal_done 63000600
+    # SLLI T0, A0, 0X3 ; a0 * 8
+    93123500
+    # SLLI T1, A0, 0X1 ; a0 * 2
+    13131500
+    # ADD A0, T0, T1 ; VALUE = VALUE * 10
+    33856200
+    # ADDI A2, A2, -48 ; CH = CH - '0'
+    130606FD
+    # ADDI T0, X0, 9 ; t0 = 9
+    93029000
+    # BLT T0, A2, NUMERATE_STRING_FAIL ; Check for illegal CH > 9
+    @numerate_string_fail 63C0C200
+    # BLT A2, X0, NUMERATE_STRING_FAIL ; Check for illegal CH < 0
+    @numerate_string_fail 63400600
+    # ADD A0, A0, A2 ; VALUE = VALUE + CH
+    3305C500
+    # ADDI A1, A1, 1 ; S = S + 1
+    93851500
+    # JAL X0, NUMERATE_DECIMAL ; Jump unconditionally to numerate_decimal
+    $numerate_decimal 6F000000
+
+:numerate_decimal_done
+    # ADDI T0, X0, 1 ; Check for negative FLAG
+    93021000
+    # BNE A3, T0, NUMERATE_STRING_DONE ; Nope
+    @numerate_string_done 63905600
+    # SUB A0, X0, A0 ; VALUE = -VALUE
+    3305A040
+    # JAL X0, NUMERATE_STRING_DONE ; Done
+    $numerate_string_done 6F000000
+
+:numerate_hex
+    # ADDI A1, A1, 2 ; S = S + 2
+    93852500
+
+:numerate_hex_loop
+    # LBU A2, 0(A1) ; S[i]
+    03C60500
+    # BEQ A2, X0, NUMERATE_STRING_DONE ; We are done if NULL == S[i]
+    @numerate_string_done 63000600
+    # SLLI A0, A0, 0X4 ; VALUE = VALUE << 4
+    13154500
+    # ADDI A2, A2, -48 ; CH = CH - '0'
+    130606FD
+    # ADDI T0, X0, 10 ; t0 = 10
+    9302A000
+    # BLT A2, T0, NUMERATE_HEX_DIGIT ; Check if we are dealing with number or letter
+    @numerate_hex_digit 63405600
+    # ADDI A2, A2, -7 ; Push A-F into range
+    130696FF
+
+:numerate_hex_digit
+    # ADDI T0, X0, 15 ; t0 = 15
+    9302F000
+    # BLT T0, A2, NUMERATE_STRING_FAIL ; Check for CH > 'F'
+    @numerate_string_fail 63C0C200
+    # BLT A2, X0, NUMERATE_STRING_FAIL ; Check for CH < 0
+    @numerate_string_fail 63400600
+    # ADD A0, A0, A2 ; VALUE = VALUE + CH
+    3305C500
+    # ADDI A1, A1, 1 ; S = S + 1
+    93851500
+    # JAL X0, NUMERATE_HEX_LOOP ; Keep looping
+    $numerate_hex_loop 6F000000
+
+:numerate_string_fail
+    # ADDI A0, X0, 0 ; return ZERO
+    13050000
+
+:numerate_string_done
+    # LD A1, 0(SP) ; restore a1
+    83350100
+    # LD A2, 8(SP) ; restore a2
+    03368100
+    # LD A3, 16(SP) ; restore a3
+    83360101
+    # ADDI SP, SP, 24 ; deallocate stack
+    13018101
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:express_number
+    # ADDI SP, SP, -32 ; allocate stack
+    130101FE
+    # SD RA, 0(SP) ; protect ra
+    23301100
+    # SD A1, 8(SP) ; protect a1
+    2334B100
+    # SD A2, 16(SP) ; protect a2
+    2338C100
+    # SD A3, 24(SP) ; protect a3
+    233CD100
+    # ADDI A2, A1, 0 ; Put CH in right place
+    13860500
+    # ADDI S5, A0, 0 ; Protect VALUE
+    930A0500
+    # ADDI A0, X0, 10 ; We need 10 bytes
+    1305A000
+    # JAL RA, MALLOC ; Get S pointer
+    $malloc EF000000
+    # ADDI A1, A0, 0 ; Put S in place
+    93050500
+    # ADDI A0, S5, 0 ; Restore VALUE
+    13850A00
+    # ADDI T0, X0, 37 ; Check for %
+    93025002
+    # BEQ A2, T0, EXPRESS_NUMBER_CONST ; Branch when condition is satisfied
+    @express_number_const 63005600
+    # ADDI S5, A1, 0 ; Protect S
+    938A0500
+    # ADDI T0, X0, 46 ; t0 = '.'
+    9302E002
+    # SD T0, 0(A1) ; S[0] = '.'
+    23B05500
+    # ADDI A1, A1, 1 ; Next byte
+    93851500
+    # ADDI T0, X0, 33 ; Check for !
+    93021002
+    # BEQ A2, T0, EXPRESS_NUMBER_I ; Branch when condition is satisfied
+    @express_number_I 63005600
+    # ADDI T0, X0, 64 ; Check for @
+    93020004
+    # BEQ A2, T0, EXPRESS_NUMBER_S ; Branch when condition is satisfied
+    @express_number_S 63005600
+    # ADDI T0, X0, 126 ; Check for ~
+    9302E007
+    # BEQ A2, T0, EXPRESS_NUMBER_U ; Branch when condition is satisfied
+    @express_number_U 63005600
+    # JAL X0, FAIL ; Error
+    $Fail 6F000000
+
+:express_number_const
+    # ADDIW T0, X0, 1 ; provides an option for 32-bit immediate constants
+    9B021000
+    # SLLI T0, T0, 0X20 ; provides an option for 32-bit immediate constants
+    93920202
+    # ADDI T0, T0, -1 ; provides an option for 32-bit immediate constants
+    9382F2FF
+    # AND A0, A0, T0 ; immediate = value & 0xffffffff
+    33755500
+    # ADDI S5, A1, 0 ; Protect S
+    938A0500
+    # JAL RA, HEX32L ; Store 32-bits
+    $hex32l EF000000
+    # JAL X0, EXPRESS_NUMBER_DONE ; done
+    $express_number_done 6F000000
+
+:express_number_I
+    # LUI T0, 0X1 ; (value & 0xfff) << 20
+    B7120000
+    # ADDIW T0, T0, -1 ; (value & 0xfff) << 20
+    9B82F2FF
+    # AND A0, A0, T0 ; value & 0xfff
+    33755500
+    # SLLI A0, A0, 0X14 ; (value & 0xfff) << 20
+    13154501
+    # JAL RA, HEX32L ; Store 32-bits
+    $hex32l EF000000
+    # JAL X0, EXPRESS_NUMBER_DONE ; done
+    $express_number_done 6F000000
+
+:express_number_S
+    # ADDI T0, X0, 31 ; ((value & 0x1f) << 7) | ((value & 0xfe0) << (31 - 11))
+    9302F001
+    # AND T1, A0, T0 ; value & 0x1f
+    33735500
+    # SLLI T1, T1, 0X7 ; (value & 0x1f) << 7
+    13137300
+    # LUI T0, 0X1 ; Prepare upper immediate bits
+    B7120000
+    # ADDIW T0, T0, -32 ; Advance algorithm state
+    9B8202FE
+    # AND T0, A0, T0 ; value & 0xfe0
+    B3725500
+    # SLLI T0, T0, 0X14 ; (value & 0xfe0) << (31 - 11)
+    93924201
+    # OR A0, T0, T1 ; Combine two parts
+    33E56200
+    # JAL RA, HEX32L ; Store 32-bits
+    $hex32l EF000000
+    # JAL X0, EXPRESS_NUMBER_DONE ; done
+    $express_number_done 6F000000
+
+:express_number_U
+    # LUI T0, 0X1 ; if value is 0x800 or more we have to add 11-th bit (0x1000) to compensate for signed extension
+    B7120000
+    # ADDIW T0, T0, -2048 ; if value is 0x800 or more we have to add 11-th bit (0x1000) to compensate for signed extension
+    9B820280
+    # LUI T1, 0X1 ; Prepare upper immediate bits
+    37130000
+    # ADDIW T1, T1, -1 ; Advance algorithm state
+    1B03F3FF
+    # LUI T2, 0X100 ; Prepare upper immediate bits
+    B7031000
+    # ADDIW T2, T2, -1 ; Advance algorithm state
+    9B83F3FF
+    # SLLI T2, T2, 0XC ; Shift bits to align field values
+    9393C300
+    # AND T1, A0, T1 ; value & 0xfff
+    33736500
+    # AND A0, A0, T2 ; value & 0xfffff000
+    33757500
+    # BLT T1, T0, EXPRESS_NUMBER_U_SMALL ; Branch when condition is satisfied
+    @express_number_U_small 63405300
+    # LUI T0, 0X1 ; Deal with sign extension: add 0x1000
+    B7120000
+    # ADDW A0, T0, A0 ; (value & 0xfffff000) + 0x1000
+    3B85A200
+
+:express_number_U_small
+    # JAL RA, HEX32L ; Store 32-bits
+    $hex32l EF000000
+    # JAL X0, EXPRESS_NUMBER_DONE ; done
+    $express_number_done 6F000000
+
+:express_number_done
+    # ADDI A0, S5, 0 ; Restore S
+    13850A00
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # LD A1, 8(SP) ; restore a1
+    83358100
+    # LD A2, 16(SP) ; restore a2
+    03360101
+    # LD A3, 24(SP) ; restore a3
+    83368101
+    # ADDI SP, SP, 32 ; deallocate stack
+    13010102
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:hex32l
+    # ADDI SP, SP, -16 ; allocate stack
+    130101FF
+    # SD RA, 0(SP) ; Protect ra
+    23301100
+    # SD A0, 8(SP) ; Protect top 16 bits
+    2334A100
+    # JAL RA, HEX16L ; Store it
+    $hex16l EF000000
+    # LD A0, 8(SP) ; do high 16 bits
+    03358100
+    # SRLI A0, A0, 0X10 ; do bottom 16 bits
+    13550501
+    # JAL RA, HEX16L ; Store it
+    $hex16l EF000000
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # ADDI SP, SP, 16 ; deallocate stack
+    13010101
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:hex16l
+    # ADDI SP, SP, -16 ; allocate stack
+    130101FF
+    # SD RA, 0(SP) ; Protect ra
+    23301100
+    # SD A0, 8(SP) ; Protect top byte
+    2334A100
+    # JAL RA, HEX8 ; Store it
+    $hex8 EF000000
+    # LD A0, 8(SP) ; do high byte
+    03358100
+    # SRLI A0, A0, 0X8 ; do bottom byte
+    13558500
+    # JAL RA, HEX8 ; Store it
+    $hex8 EF000000
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # ADDI SP, SP, 16 ; deallocate stack
+    13010101
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:hex8
+    # ADDI SP, SP, -16 ; allocate stack
+    130101FF
+    # SD RA, 0(SP) ; Protect ra
+    23301100
+    # SD A0, 8(SP) ; Protect bottom nibble
+    2334A100
+    # SRLI A0, A0, 0X4 ; do high nibble first
+    13554500
+    # JAL RA, HEX4 ; Store it
+    $hex4 EF000000
+    # LD A0, 8(SP) ; do low nibble
+    03358100
+    # JAL RA, HEX4 ; Store it
+    $hex4 EF000000
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # ADDI SP, SP, 16 ; deallocate stack
+    13010101
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:hex4
+    # ADDI T0, X0, 15 ; Load immediate constant
+    9302F000
+    # AND A0, A0, T0 ; isolate nibble
+    33755500
+    # ADDI A0, A0, 48 ; convert to ascii
+    13050503
+    # ADDI T0, X0, 57 ; t0 = '9'
+    93029003
+    # BGE T0, A0, HEX1 ; check if valid digit
+    @hex1 63D0A200
+    # ADDI A0, A0, 7 ; use alpha range
+    13057500
+
+:hex1
+    # SB A0, 0(A1) ; store result
+    2380A500
+    # ADDI A1, A1, 1 ; next position
+    93851500
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:Preserve_Other
+    # ADDI SP, SP, -32 ; allocate stack
+    130101FE
+    # SD A1, 0(SP) ; protect a1
+    2330B100
+    # SD A2, 8(SP) ; protect a2
+    2334C100
+    # SD A3, 16(SP) ; protect a3
+    2338D100
+    # SD A4, 24(SP) ; protect a4
+    233CE100
+
+:Preserve_Other_Loop
+    # LD A1, 24(A0) ; I->EXPRESSION
+    83358501
+    # BNE A1, X0, PRESERVE_OTHER_NEXT ; IF NULL == I->EXPRESSION then preserve
+    @Preserve_Other_Next 63900500
+    # LD A1, 16(A0) ; I->TEXT
+    83350501
+    # SD A1, 24(A0) ; I->EXPRESSION = I->TEXT
+    233CB500
+
+:Preserve_Other_Next
+    # LD A0, 0(A0) ; I = I->NEXT
+    03350500
+    # BNE A0, X0, PRESERVE_OTHER_LOOP ; Keep looping until I == NULL
+    @Preserve_Other_Loop 63100500
+    # LD A1, 0(SP) ; restore a1
+    83350100
+    # LD A2, 8(SP) ; restore a2
+    03368100
+    # LD A3, 16(SP) ; restore a3
+    83360101
+    # LD A4, 24(SP) ; restore a4
+    03378101
+    # ADDI SP, SP, 32 ; deallocate stack
+    13010102
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:Serialize_Expressions
+    # ADDI SP, SP, -32 ; allocate stack
+    130101FE
+    # SD RA, 0(SP) ; protect ra
+    23301100
+    # SD A2, 8(SP) ; protect a2
+    2334C100
+    # SD A3, 16(SP) ; protect a3
+    2338D100
+    # SD A4, 24(SP) ; protect a4
+    233CE100
+    # LUI A2, 0X1 ; output text buffer start
+    37160000
+    # ADDIW A2, A2, -2041 ; output text buffer start
+    1B067680
+    # SLLI A2, A2, 0X14 ; output text buffer start
+    13164601
+    # ADDI A3, A2, 0 ; running write pointer
+    93060600
+    # ADDI A4, S4, 0 ; I = HEAD
+    13070A00
+
+:Serialize_Expressions_Loop
+    # BEQ A4, X0, SERIALIZE_EXPRESSIONS_DONE ; Branch when condition is satisfied
+    @Serialize_Expressions_Done 63000700
+    # LD T0, 8(A4) ; I->TYPE
+    83328700
+    # ADDI T1, X0, 1 ; MACRO
+    13031000
+    # BEQ T0, T1, SERIALIZE_EXPRESSIONS_NEXT ; Branch when condition is satisfied
+    @Serialize_Expressions_Next 63806200
+    # LD T0, 24(A4) ; I->EXPRESSION
+    83328701
+    # BEQ T0, X0, SERIALIZE_EXPRESSIONS_NEXT ; Branch when condition is satisfied
+    @Serialize_Expressions_Next 63800200
+
+:Serialize_Expressions_Copy
+    # LBU T1, 0(T0) ; c = expression[i]
+    03C30200
+    # BEQ T1, X0, SERIALIZE_EXPRESSIONS_TERM ; Branch when condition is satisfied
+    @Serialize_Expressions_Term 63000300
+    # SB T1, 0(A3) ; write c
+    23806600
+    # ADDI A3, A3, 1 ; Advance algorithm state
+    93861600
+    # ADDI T0, T0, 1 ; Advance algorithm state
+    93821200
+    # JAL X0, SERIALIZE_EXPRESSIONS_COPY ; Jump unconditionally to Serialize_Expressions_Copy
+    $Serialize_Expressions_Copy 6F000000
+
+:Serialize_Expressions_Term
+    # ADDI T1, X0, 10 ; '\n'
+    1303A000
+    # SB T1, 0(A3) ; Store value to memory
+    23806600
+    # ADDI A3, A3, 1 ; Advance algorithm state
+    93861600
+
+:Serialize_Expressions_Next
+    # LD A4, 0(A4) ; I = I->NEXT
+    03370700
+    # JAL X0, SERIALIZE_EXPRESSIONS_LOOP ; Jump unconditionally to Serialize_Expressions_Loop
+    $Serialize_Expressions_Loop 6F000000
+
+:Serialize_Expressions_Done
+    # ADDI A0, A2, 0 ; start pointer
+    13050600
+    # ADDI A1, A3, 0 ; end pointer
+    93850600
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # LD A2, 8(SP) ; restore a2
+    03368100
+    # LD A3, 16(SP) ; restore a3
+    83360101
+    # LD A4, 24(SP) ; restore a4
+    03378101
+    # ADDI SP, SP, 32 ; deallocate stack
+    13010102
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:Print_Hex
+    # ADDI SP, SP, -24 ; allocate stack
+    130181FE
+    # SD RA, 0(SP) ; protect ra
+    23301100
+    # SD A1, 8(SP) ; protect a1
+    2334B100
+    # SD A2, 16(SP) ; protect a2
+    2338C100
+    # ADDI A1, S4, 0 ; I = HEAD
+    93050A00
+
+:Print_Hex_Loop
+    # LD A0, 8(A1) ; I->TYPE
+    03B58500
+    # ADDI T0, X0, 1 ; t0 = MACRO
+    93021000
+    # BEQ A0, T0, PRINT_HEX_NEXT ; Skip if MACRO = I->TYPE
+    @Print_Hex_Next 63005500
+    # LD A0, 24(A1) ; Using EXPRESSION
+    03B58501
+    # JAL RA, FILE_PRINT ; Print it
+    $File_Print EF000000
+    # ADDI A0, X0, 10 ; \n
+    1305A000
+    # JAL RA, FPUTC ; Print newline
+    $fputc EF000000
+
+:Print_Hex_Next
+    # LD A1, 0(A1) ; Iterate to next Token
+    83B50500
+    # BNE A1, X0, PRINT_HEX_LOOP ; Stop if NULL, otherwise keep looping
+    @Print_Hex_Loop 63900500
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # LD A1, 8(SP) ; restore a1
+    83358100
+    # LD A2, 16(SP) ; restore a2
+    03360101
+    # ADDI SP, SP, 24 ; deallocate stack
+    13018101
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:File_Print
+    # ADDI SP, SP, -24 ; allocate stack
+    130181FE
+    # SD RA, 0(SP) ; protect ra
+    23301100
+    # SD A1, 8(SP) ; protect a1
+    2334B100
+    # SD A2, 16(SP) ; protect a2
+    2338C100
+    # ADDI A1, A0, 0 ; protect a0
+    93050500
+    # BEQ A0, X0, FILE_PRINT_DONE ; Protect against nulls
+    @File_Print_Done 63000500
+
+:File_Print_Loop
+    # LBU A0, 0(A1) ; Read byte
+    03C50500
+    # BEQ A0, X0, FILE_PRINT_DONE ; Stop at NULL
+    @File_Print_Done 63000500
+    # JAL RA, FPUTC ; print it
+    $fputc EF000000
+    # ADDI A1, A1, 1 ; S = S + 1
+    93851500
+    # JAL X0, FILE_PRINT_LOOP ; Keep printing
+    $File_Print_Loop 6F000000
+
+:File_Print_Done
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # LD A1, 8(SP) ; restore a1
+    83358100
+    # LD A2, 16(SP) ; restore a2
+    03360101
+    # ADDI SP, SP, 24 ; deallocate stack
+    13018101
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:fgetc
+    # BGE S2, S3, FGETC_EOF ; Check if we've reached end of buffer
+    @fgetc_eof 63503901
+    # LB A0, 0(S2) ; Load byte from buffer
+    03050900
+    # ADDI S2, S2, 1 ; Advance buffer pointer
+    13091900
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:fgetc_eof
+    # ADDI A0, X0, -4 ; Return EOF
+    1305C0FF
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:malloc
+    # ADDI T0, S1, 0 ; Store the current pointer
+    93820400
+    # ADD S1, S1, A0 ; Bump the pointer by requested bytes
+    B384A400
+    # ADDI A0, T0, 0 ; Return the old pointer
+    13850200
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:fputc
+    # ADDI SP, SP, -8 ; allocate stack
+    130181FF
+    # SD A1, 0(SP) ; protect a1
+    2330B100
+    # LUI A1, 0X10000 ; UART_LSR
+    B7050010
+    # ADDIW A1, A1, 5 ; UART_LSR
+    9B855500
+
+:fputc_wait
+    # LB T0, 0(A1) ; Read LSR
+    83820500
+    # ANDI T0, T0, 32 ; Check bit 5 (THR Empty)
+    93F20202
+    # BEQ T0, X0, FPUTC_WAIT ; If TX not ready, wait
+    @fputc_wait 63800200
+    # LUI A1, 0X10000 ; UART_BASE
+    B7050010
+    # SB A0, 0(A1) ; Write character
+    2380A500
+    # LD A1, 0(SP) ; restore a1
+    83350100
+    # ADDI SP, SP, 8 ; deallocate stack
+    13018100
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:Fail
+    # JAL X0, FAIL ; Halt (infinite loop)
+    $Fail 6F000000
+
+:M0_backend_assemble_and_exec
+    # ADDI S2, A0, 0 ; a0 = input_buffer start, a1 = input_buffer end, a2 = heap pointer
+    13090500
+    # ADDI S3, A0, 0 ; Copy register value
+    93090500
+    # ADDI S11, A1, 0 ; Copy register value
+    938D0500
+    # ADDI S9, A2, 0 ; Copy register value
+    930C0600
+    # ADDI S1, X0, 0 ; jump table head = NULL
+    93040000
+    # ADDI S4, X0, -1 ; Toggle
+    130AF0FF
+    # ADDI S5, X0, 0 ; Hold
+    930A0000
+    # ADDI S6, X0, 0 ; Instruction Pointer (relative)
+    130B0000
+    # JAL RA, BACKEND_CLEARSCRATCH ; Zero scratch
+    $backend_ClearScratch EF000000
+    # JAL RA, BACKEND_FIRST_PASS ; First pass
+    $backend_First_pass EF000000
+    # ADDI S2, S3, 0 ; Reset to start of buffer
+    13890900
+    # ADDI S4, X0, -1 ; Toggle
+    130AF0FF
+    # ADDI S5, X0, 0 ; Hold
+    930A0000
+    # ADDI S6, X0, 0 ; Instruction Pointer
+    130B0000
+    # ADDI S7, X0, 0 ; tempword
+    930B0000
+    # ADDI S8, X0, 0 ; Shift register
+    130C0000
+    # JAL RA, BACKEND_SECOND_PASS ; Now do the second pass
+    $backend_Second_pass EF000000
+    # LUI T0, 0X1 ; output_buffer
+    B7120000
+    # ADDIW T0, T0, -2045 ; output_buffer
+    9B823280
+    # SLLI T0, T0, 0X14 ; output_buffer
+    93924201
+    # JALR X0, 0(T0) ; Jump to address held in register
+    67800200
+
+:backend_First_pass
+    # ADDI SP, SP, -8 ; Allocate stack
+    130181FF
+    # SD RA, 0(SP) ; protect ra
+    23301100
+
+:backend_First_pass_loop
+    # BGE S2, S11, BACKEND_FIRST_PASS_DONE ; Check if we've reached end of buffer
+    @backend_First_pass_done 6350B901
+    # JAL RA, BACKEND_READ_BYTE ; Get another byte
+    $backend_Read_byte EF000000
+    # ADDI T1, X0, 58 ; Check for :
+    1303A003
+    # BEQ A0, T1, BACKEND_STORELABEL ; Store this label
+    @backend_StoreLabel 63006500
+    # ADDI T1, X0, 46 ; Check for '.'
+    1303E002
+    # BEQ A0, T1, BACKEND_FIRST_PASS_UPDATEWORD ; Branch when condition is satisfied
+    @backend_First_pass_UpdateWord 63006500
+    # ADDI T1, X0, 37 ; Check for %
+    13035002
+    # BEQ A0, T1, BACKEND_FIRST_PASS_POINTER ; Branch when condition is satisfied
+    @backend_First_pass_pointer 63006500
+    # ADDI T1, X0, 38 ; Check for &
+    13036002
+    # BEQ A0, T1, BACKEND_FIRST_PASS_POINTER ; Branch when condition is satisfied
+    @backend_First_pass_pointer 63006500
+    # ADDI T1, X0, 33 ; Check for !
+    13031002
+    # BEQ A0, T1, BACKEND_THROWAWAY_TOKEN ; Branch when condition is satisfied
+    @backend_Throwaway_token 63006500
+    # ADDI T1, X0, 64 ; Check for @
+    13030004
+    # BEQ A0, T1, BACKEND_THROWAWAY_TOKEN ; Branch when condition is satisfied
+    @backend_Throwaway_token 63006500
+    # ADDI T1, X0, 36 ; Check for $
+    13034002
+    # BEQ A0, T1, BACKEND_THROWAWAY_TOKEN ; Branch when condition is satisfied
+    @backend_Throwaway_token 63006500
+    # ADDI T1, X0, 126 ; Check for ~
+    1303E007
+    # BEQ A0, T1, BACKEND_THROWAWAY_TOKEN ; Branch when condition is satisfied
+    @backend_Throwaway_token 63006500
+    # ADDI T1, X0, 60 ; Check for <
+    1303C003
+    # ADDI A1, X0, -1 ; write = false
+    9305F0FF
+    # BEQ A0, T1, BACKEND_PADTOALIGN ; Branch when condition is satisfied
+    @backend_PadToAlign 63006500
+    # ADDI A1, X0, -1 ; write = false
+    9305F0FF
+    # ADDI A2, X0, -1 ; update = false
+    1306F0FF
+    # JAL RA, BACKEND_DOBYTE ; Deal with everything else
+    $backend_DoByte EF000000
+    # JAL X0, BACKEND_FIRST_PASS_LOOP ; Keep looping
+    $backend_First_pass_loop 6F000000
+
+:backend_Throwaway_token
+    # ADDIW A1, X0, 513 ; scratch address
+    9B051020
+    # SLLI A1, A1, 0X16 ; scratch address
+    93956501
+    # JAL RA, BACKEND_CONSUME_TOKEN ; Read token
+    $backend_consume_token EF000000
+    # JAL RA, BACKEND_CLEARSCRATCH ; Throw away token
+    $backend_ClearScratch EF000000
+    # JAL X0, BACKEND_FIRST_PASS_LOOP ; Loop again
+    $backend_First_pass_loop 6F000000
+
+:backend_First_pass_pointer
+    # ADDI S6, S6, 4 ; Update ip
+    130B4B00
+    # ADDIW A1, X0, 513 ; scratch address
+    9B051020
+    # SLLI A1, A1, 0X16 ; scratch address
+    93956501
+    # JAL RA, BACKEND_CONSUME_TOKEN ; Read token
+    $backend_consume_token EF000000
+    # JAL RA, BACKEND_CLEARSCRATCH ; Throw away token
+    $backend_ClearScratch EF000000
+    # ADDI T1, X0, 62 ; Check for '>'
+    1303E003
+    # BNE A0, T1, BACKEND_FIRST_PASS_LOOP ; Loop again
+    @backend_First_pass_loop 63106500
+    # ADDIW A1, X0, 513 ; scratch address
+    9B051020
+    # SLLI A1, A1, 0X16 ; scratch address
+    93956501
+    # JAL RA, BACKEND_CONSUME_TOKEN ; Read token
+    $backend_consume_token EF000000
+    # JAL RA, BACKEND_CLEARSCRATCH ; Throw away token
+    $backend_ClearScratch EF000000
+    # JAL X0, BACKEND_FIRST_PASS_LOOP ; Loop again
+    $backend_First_pass_loop 6F000000
+
+:backend_First_pass_UpdateWord
+    # ADDI S10, X0, 0 ; updates = 0
+    130D0000
+    # ADDI S7, X0, 0 ; tempword = 0
+    930B0000
+    # ADDI A5, X0, 4 ; a5 = 4
+    93074000
+
+:backend_First_pass_UpdateWord_loop
+    # JAL RA, BACKEND_READ_BYTE ; Read another byte into a0
+    $backend_Read_byte EF000000
+    # ADDI A1, X0, -1 ; write = false
+    9305F0FF
+    # ADDI A2, X0, 0 ; update = true
+    13060000
+    # JAL RA, BACKEND_DOBYTE ; Process byte
+    $backend_DoByte EF000000
+    # BLT S10, A5, BACKEND_FIRST_PASS_UPDATEWORD_LOOP ; loop 4 times
+    @backend_First_pass_UpdateWord_loop 6340FD00
+    # ADDI S6, S6, -4 ; ip = ip - 4
+    130BCBFF
+    # JAL X0, BACKEND_FIRST_PASS_LOOP ; Loop again
+    $backend_First_pass_loop 6F000000
+
+:backend_First_pass_done
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # ADDI SP, SP, 8 ; deallocate stack
+    13018100
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:backend_Second_pass
+    # ADDI SP, SP, -8 ; Allocate stack
+    130181FF
+    # SD RA, 0(SP) ; protect ra
+    23301100
+    # LUI A7, 0X1 ; output_buffer - use a7 as output pointer
+    B7180000
+    # ADDIW A7, A7, -2045 ; output_buffer - use a7 as output pointer
+    9B883880
+    # SLLI A7, A7, 0X14 ; output_buffer - use a7 as output pointer
+    93984801
+
+:backend_Second_pass_loop
+    # BGE S2, S11, BACKEND_SECOND_PASS_DONE ; Check if we've reached end of buffer
+    @backend_Second_pass_done 6350B901
+    # JAL RA, BACKEND_READ_BYTE ; Read another byte
+    $backend_Read_byte EF000000
+    # ADDI T1, X0, 58 ; Drop the label
+    1303A003
+    # BNE A0, T1, BACKEND_SECOND_PASS_0 ; Branch when condition is satisfied
+    @backend_Second_pass_0 63106500
+    # ADDIW A1, X0, 513 ; scratch address
+    9B051020
+    # SLLI A1, A1, 0X16 ; scratch address
+    93956501
+    # JAL RA, BACKEND_CONSUME_TOKEN ; Read the label
+    $backend_consume_token EF000000
+    # JAL RA, BACKEND_CLEARSCRATCH ; Throw away token
+    $backend_ClearScratch EF000000
+    # JAL X0, BACKEND_SECOND_PASS_LOOP ; Continue looping
+    $backend_Second_pass_loop 6F000000
+
+:backend_Second_pass_0
+    # ADDI T1, X0, 46 ; Check for '.'
+    1303E002
+    # BEQ A0, T1, BACKEND_SECOND_PASS_UPDATEWORD ; Branch when condition is satisfied
+    @backend_Second_pass_UpdateWord 63006500
+    # ADDI T1, X0, 37 ; Check for %
+    13035002
+    # BEQ A0, T1, BACKEND_STOREPOINTER ; Branch when condition is satisfied
+    @backend_StorePointer 63006500
+    # ADDI T1, X0, 38 ; Check for &
+    13036002
+    # BEQ A0, T1, BACKEND_STOREPOINTER ; Branch when condition is satisfied
+    @backend_StorePointer 63006500
+    # ADDI T1, X0, 33 ; Check for !
+    13031002
+    # BEQ A0, T1, BACKEND_UPDATESHIFTREGISTER ; Branch when condition is satisfied
+    @backend_UpdateShiftRegister 63006500
+    # ADDI T1, X0, 64 ; Check for @
+    13030004
+    # BEQ A0, T1, BACKEND_UPDATESHIFTREGISTER ; Branch when condition is satisfied
+    @backend_UpdateShiftRegister 63006500
+    # ADDI T1, X0, 36 ; Check for $
+    13034002
+    # BEQ A0, T1, BACKEND_UPDATESHIFTREGISTER ; Branch when condition is satisfied
+    @backend_UpdateShiftRegister 63006500
+    # ADDI T1, X0, 126 ; Check for ~
+    1303E007
+    # BEQ A0, T1, BACKEND_UPDATESHIFTREGISTER ; Branch when condition is satisfied
+    @backend_UpdateShiftRegister 63006500
+    # ADDI T1, X0, 60 ; Check for <
+    1303C003
+    # ADDI A1, X0, 0 ; write = true
+    93050000
+    # BEQ A0, T1, BACKEND_PADTOALIGN ; Branch when condition is satisfied
+    @backend_PadToAlign 63006500
+    # ADDI A1, X0, 0 ; write = true
+    93050000
+    # ADDI A2, X0, -1 ; update = false
+    1306F0FF
+    # JAL RA, BACKEND_DOBYTE ; Process our char
+    $backend_DoByte EF000000
+    # JAL X0, BACKEND_SECOND_PASS_LOOP ; continue looping
+    $backend_Second_pass_loop 6F000000
+
+:backend_Second_pass_UpdateWord
+    # ADDI S10, X0, 0 ; updates = 0
+    130D0000
+    # ADDI S7, X0, 0 ; tempword = 0
+    930B0000
+    # ADDI A5, X0, 4 ; a5 = 4
+    93074000
+
+:backend_Second_pass_UpdateWord_loop
+    # JAL RA, BACKEND_READ_BYTE ; Read another byte into a0
+    $backend_Read_byte EF000000
+    # ADDI A1, X0, -1 ; write = false
+    9305F0FF
+    # ADDI A2, X0, 0 ; update = true
+    13060000
+    # JAL RA, BACKEND_DOBYTE ; Process byte
+    $backend_DoByte EF000000
+    # BLT S10, A5, BACKEND_SECOND_PASS_UPDATEWORD_LOOP ; loop 4 times
+    @backend_Second_pass_UpdateWord_loop 6340FD00
+    # ADDI A0, S7, 0 ; tempword
+    13850B00
+    # JAL X0, BACKEND_UPDATESHIFTREGISTER_DOT ; UpdateShiftRegister('.', tempword)
+    $backend_UpdateShiftRegister_DOT 6F000000
+
+:backend_UpdateShiftRegister
+    # ADDI A2, A0, 0 ; Store label prefix
+    13060500
+    # ADDIW A1, X0, 513 ; Get scratch
+    9B051020
+    # SLLI A1, A1, 0X16 ; Get scratch
+    93956501
+    # JAL RA, BACKEND_CLEARSCRATCH ; Clear scratch
+    $backend_ClearScratch EF000000
+    # JAL RA, BACKEND_CONSUME_TOKEN ; Read token
+    $backend_consume_token EF000000
+    # JAL RA, BACKEND_GETTARGET ; Get target
+    $backend_GetTarget EF000000
+    # LD A0, 0(A0) ; Dereference pointer
+    03350500
+    # SUB A0, A0, S6 ; target - ip
+    33056541
+    # ADDI T1, X0, 33 ; Check for !
+    13031002
+    # BEQ A2, T1, BACKEND_UPDATESHIFTREGISTER_I ; Branch when condition is satisfied
+    @backend_UpdateShiftRegister_I 63006600
+    # ADDI T1, X0, 64 ; Check for @
+    13030004
+    # BEQ A2, T1, BACKEND_UPDATESHIFTREGISTER_B ; Branch when condition is satisfied
+    @backend_UpdateShiftRegister_B 63006600
+    # ADDI T1, X0, 36 ; Check for $
+    13034002
+    # BEQ A2, T1, BACKEND_UPDATESHIFTREGISTER_J ; Branch when condition is satisfied
+    @backend_UpdateShiftRegister_J 63006600
+    # ADDI T1, X0, 126 ; Check for ~
+    1303E007
+    # BEQ A2, T1, BACKEND_UPDATESHIFTREGISTER_U ; Branch when condition is satisfied
+    @backend_UpdateShiftRegister_U 63006600
+    # JAL X0, BACKEND_SECOND_PASS_LOOP ; Continue looping
+    $backend_Second_pass_loop 6F000000
+
+:backend_UpdateShiftRegister_DOT
+    # SRLIW T2, A0, 0X18 ; value >> 24
+    9B538501
+    # ADDI T1, X0, 255 ; t1 = 0xff
+    1303F00F
+    # AND T0, T1, T2 ; (value >> 24) & 0xff
+    B3727300
+    # SLLIW T2, A0, 0X8 ; value << 8
+    9B138500
+    # LUI T1, 0XFF0 ; t1 = 0xff0000
+    3703FF00
+    # AND T2, T1, T2 ; (value << 8) & 0xff0000
+    B3737300
+    # OR T0, T0, T2 ; logical or with the previous expression
+    B3E27200
+    # SRLIW T2, A0, 0X8 ; value >> 8
+    9B538500
+    # LUI T1, 0X10 ; t1 = 0xff00
+    37030100
+    # ADDIW T1, T1, -256 ; t1 = 0xff00
+    1B0303F0
+    # AND T2, T1, T2 ; (value >> 8) & 0xff00
+    B3737300
+    # OR T0, T0, T2 ; logical or with the previous expression
+    B3E27200
+    # SLLIW T2, A0, 0X18 ; value << 24
+    9B138501
+    # ADDIW T1, X0, 255 ; t1 = 0xff000000
+    1B03F00F
+    # SLLI T1, T1, 0X18 ; t1 = 0xff000000
+    13138301
+    # AND T2, T1, T2 ; (value << 24) & 0xff000000
+    B3737300
+    # OR T0, T0, T2 ; swap
+    B3E27200
+    # XOR S8, S8, T0 ; shiftregister = shiftregister ^ swap
+    334C5C00
+    # ADDI S6, S6, -4 ; ip = ip - 4
+    130BCBFF
+    # JAL X0, BACKEND_SECOND_PASS_LOOP ; continue looping
+    $backend_Second_pass_loop 6F000000
+
+:backend_UpdateShiftRegister_I
+    # ADDIW A0, A0, 4 ; add 4 due to this being 2nd part of AUIPC combo
+    1B054500
+    # LUI T1, 0X1 ; Prepare upper immediate bits
+    37130000
+    # ADDIW T1, T1, -1 ; Advance algorithm state
+    1B03F3FF
+    # AND T1, A0, T1 ; (value & 0xfff)
+    33736500
+    # SLLIW S7, T1, 0X14 ; tempword = (value & 0xfff) << 20
+    9B1B4301
+    # XOR S8, S8, S7 ; shiftregister = shiftregister ^ tempword
+    334C7C01
+    # JAL X0, BACKEND_SECOND_PASS_LOOP ; Continue looping
+    $backend_Second_pass_loop 6F000000
+
+:backend_UpdateShiftRegister_B
+    # ADDI T1, X0, 30 ; | ((value & 0x1000) << (31 - 12))  , imm[12]
+    1303E001
+    # AND T1, A0, T1 ; value & 0x1e
+    33736500
+    # SLLIW T0, T1, 0X7 ; tempword = (value & 0x1e) << 7
+    9B127300
+    # ADDI T1, X0, 2016 ; Load immediate constant
+    1303007E
+    # AND T1, A0, T1 ; value & 0x7e0
+    33736500
+    # SLLIW T1, T1, 0X14 ; (value & 0x7e0) << (31 - 11)
+    1B134301
+    # OR T0, T0, T1 ; logical or with the previous expression
+    B3E26200
+    # LUI T1, 0X1 ; Prepare upper immediate bits
+    37130000
+    # ADDIW T1, T1, -2048 ; Advance algorithm state
+    1B030380
+    # AND T1, A0, T1 ; value & 0x800
+    33736500
+    # SRLIW T1, T1, 0X4 ; (value & 0x800) >> 4
+    1B534300
+    # OR T0, T0, T1 ; logical or with the previous expression
+    B3E26200
+    # LUI T1, 0X1 ; Prepare upper immediate bits
+    37130000
+    # AND T1, A0, T1 ; value & 0x1000
+    33736500
+    # SLLIW T1, T1, 0X13 ; (value & 0x1000) << (31 - 12)
+    1B133301
+    # OR S7, T0, T1 ; tempword
+    B3EB6200
+    # XOR S8, S8, S7 ; shiftregister = shiftregister ^ tempword
+    334C7C01
+    # JAL X0, BACKEND_SECOND_PASS_LOOP ; Continue looping
+    $backend_Second_pass_loop 6F000000
+
+:backend_UpdateShiftRegister_J
+    # ADDI T1, X0, 2046 ; | ((value & 0x100000) << (31 - 20)) , imm[20]
+    1303E07F
+    # AND T1, A0, T1 ; value & 0x7fe
+    33736500
+    # SLLIW T0, T1, 0X14 ; tempword = (value & 0x7fe) << 20
+    9B124301
+    # LUI T1, 0X1 ; Prepare upper immediate bits
+    37130000
+    # ADDIW T1, T1, -2048 ; Advance algorithm state
+    1B030380
+    # AND T1, A0, T1 ; value & 0x800
+    33736500
+    # SLLIW T1, T1, 0X9 ; (value & 0x800) << (20 - 11)
+    1B139300
+    # OR T0, T0, T1 ; logical or with the previous expression
+    B3E26200
+    # LUI T1, 0XFF ; Prepare upper immediate bits
+    37F30F00
+    # AND T1, A0, T1 ; value & 0xff000
+    33736500
+    # OR T0, T0, T1 ; logical or with the previous expression
+    B3E26200
+    # LUI T1, 0X100 ; Prepare upper immediate bits
+    37031000
+    # AND T1, A0, T1 ; value & 0x100000
+    33736500
+    # SLLIW T1, T1, 0XB ; (value & 0x100000) << (31 - 20)
+    1B13B300
+    # OR S7, T0, T1 ; tempword
+    B3EB6200
+    # XOR S8, S8, S7 ; shiftregister = shiftregister ^ tempword
+    334C7C01
+    # JAL X0, BACKEND_SECOND_PASS_LOOP ; Continue looping
+    $backend_Second_pass_loop 6F000000
+
+:backend_UpdateShiftRegister_U
+    # LUI T0, 0X1 ; if value is 0x800 or more we have to add 11-th bit (0x1000) to compensate for signed extension
+    B7120000
+    # ADDIW T0, T0, -2048 ; if value is 0x800 or more we have to add 11-th bit (0x1000) to compensate for signed extension
+    9B820280
+    # LUI T1, 0X1 ; Prepare upper immediate bits
+    37130000
+    # ADDIW T1, T1, -1 ; Advance algorithm state
+    1B03F3FF
+    # LUI T2, 0X100 ; Prepare upper immediate bits
+    B7031000
+    # ADDIW T2, T2, -1 ; Advance algorithm state
+    9B83F3FF
+    # SLLI T2, T2, 0XC ; Shift bits to align field values
+    9393C300
+    # AND T1, A0, T1 ; value & 0xfff
+    33736500
+    # AND S7, A0, T2 ; value & 0xfffff000
+    B37B7500
+    # BLT T1, T0, BACKEND_UPDATESHIFTREGISTER_U_SMALL ; Branch when condition is satisfied
+    @backend_UpdateShiftRegister_U_small 63405300
+    # LUI T0, 0X1 ; Deal with sign extension: add 0x1000
+    B7120000
+    # ADDW S7, T0, S7 ; (value & 0xfffff000) + 0x1000
+    BB8B7201
+
+:backend_UpdateShiftRegister_U_small
+    # XOR S8, S8, S7 ; shiftregister = shiftregister ^ tempword
+    334C7C01
+    # JAL X0, BACKEND_SECOND_PASS_LOOP ; Continue looping
+    $backend_Second_pass_loop 6F000000
+
+:backend_StorePointer
+    # ADDI S6, S6, 4 ; Update ip
+    130B4B00
+    # ADDI A2, A0, 0 ; Store label prefix
+    13060500
+    # ADDIW A1, X0, 513 ; Get scratch
+    9B051020
+    # SLLI A1, A1, 0X16 ; Get scratch
+    93956501
+    # JAL RA, BACKEND_CLEARSCRATCH ; clear scratch
+    $backend_ClearScratch EF000000
+    # JAL RA, BACKEND_CONSUME_TOKEN ; consume token
+    $backend_consume_token EF000000
+    # ADDI A5, A0, 0 ; save char
+    93070500
+    # JAL RA, BACKEND_GETTARGET ; Get target
+    $backend_GetTarget EF000000
+    # LD A1, 0(A0) ; Dereference pointer
+    83350500
+    # ADDI T1, X0, 62 ; If char is > then change relative base address to ip
+    1303E003
+    # BEQ T1, A5, BACKEND_STOREPOINTER_1 ; Branch when condition is satisfied
+    @backend_StorePointer_1 6300F300
+    # ADDI T1, X0, 38 ; Check for &
+    13036002
+    # BEQ A2, T1, BACKEND_STOREPOINTER_0 ; Branch when condition is satisfied
+    @backend_StorePointer_0 63006600
+    # ADDI T1, X0, 37 ; Check for %
+    13035002
+    # BNE A2, T1, BACKEND_FAIL ; Branch when condition is satisfied
+    @backend_Fail 63106600
+    # SUB A1, A1, S6 ; displacement = target - ip
+    B3856541
+
+:backend_StorePointer_0
+    # ADDI A5, X0, 4 ; number of bytes
+    93074000
+
+:backend_StorePointer_loop
+    # SRLI T1, A1, 0X8 ; value / 256
+    13D38500
+    # SLLI A0, T1, 0X8 ; Shift bits to align field values
+    13158300
+    # SUB A0, A1, A0 ; byte = value % 256
+    3385A540
+    # ADDI A1, T1, 0 ; value = value / 256
+    93050300
+    # JAL RA, BACKEND_WRITE_BYTE ; write value
+    $backend_write_byte EF000000
+    # ADDI A5, A5, -1 ; decrease number of bytes to write
+    9387F7FF
+    # BNE A5, X0, BACKEND_STOREPOINTER_LOOP ; continue looping
+    @backend_StorePointer_loop 63900700
+    # JAL X0, BACKEND_SECOND_PASS_LOOP ; Continue looping
+    $backend_Second_pass_loop 6F000000
+
+:backend_StorePointer_1
+    # ADDI A2, A1, 0 ; save target
+    13860500
+    # ADDIW A1, X0, 513 ; Get scratch
+    9B051020
+    # SLLI A1, A1, 0X16 ; Get scratch
+    93956501
+    # JAL RA, BACKEND_CLEARSCRATCH ; clear scratch
+    $backend_ClearScratch EF000000
+    # JAL RA, BACKEND_CONSUME_TOKEN ; consume token
+    $backend_consume_token EF000000
+    # JAL RA, BACKEND_GETTARGET ; Get target
+    $backend_GetTarget EF000000
+    # LD A1, 0(A0) ; Dereference pointer
+    83350500
+    # SUB A1, A2, A1 ; displacement = target - ip
+    B305B640
+    # JAL X0, BACKEND_STOREPOINTER_0 ; Continue looping
+    $backend_StorePointer_0 6F000000
+
+:backend_Second_pass_done
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # ADDI SP, SP, 8 ; Deallocate stack
+    13018100
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:backend_PadToAlign
+    # ADDI T1, X0, 1 ; t1 = 1
+    13031000
+    # AND A0, S6, T1 ; ip & 0x1
+    33756B00
+    # BNE A0, T1, BACKEND_PADTOALIGN_1 ; check if ip & 0x1 == 1
+    @backend_PadToAlign_1 63106500
+    # ADD S6, S6, T1 ; ip = ip + 1
+    330B6B00
+    # BNE A1, X0, BACKEND_PADTOALIGN_1 ; check if we have to write
+    @backend_PadToAlign_1 63900500
+    # ADDI A0, X0, 0 ; a0 = 0
+    13050000
+    # JAL RA, BACKEND_WRITE_BYTE ; write 0
+    $backend_write_byte EF000000
+
+:backend_PadToAlign_1
+    # ADDI T1, X0, 2 ; t1 = 2
+    13032000
+    # AND A0, S6, T1 ; ip & 0x2
+    33756B00
+    # BNE A0, T1, BACKEND_PADTOALIGN_2 ; check if ip & 0x2 == 2
+    @backend_PadToAlign_2 63106500
+    # ADD S6, S6, T1 ; ip = ip + 2
+    330B6B00
+    # BNE A1, X0, BACKEND_PADTOALIGN_2 ; check if we have to write
+    @backend_PadToAlign_2 63900500
+    # ADDI A0, X0, 0 ; a0 = 0
+    13050000
+    # JAL RA, BACKEND_WRITE_BYTE ; write 0
+    $backend_write_byte EF000000
+    # ADDI A0, X0, 0 ; a0 = 0
+    13050000
+    # JAL RA, BACKEND_WRITE_BYTE ; write 0
+    $backend_write_byte EF000000
+
+:backend_PadToAlign_2
+    # BEQ A1, X0, BACKEND_SECOND_PASS_LOOP ; return to Second_pass
+    @backend_Second_pass_loop 63800500
+    # JAL X0, BACKEND_FIRST_PASS_LOOP ; return to First_pass
+    $backend_First_pass_loop 6F000000
+
+:backend_ClearScratch
+    # ADDI SP, SP, -24 ; Allocate stack
+    130181FE
+    # SD RA, 0(SP) ; protect ra
+    23301100
+    # SD A0, 8(SP) ; protect a0
+    2334A100
+    # SD A1, 16(SP) ; protect a1
+    2338B100
+    # ADDIW A0, X0, 513 ; scratch address
+    1B051020
+    # SLLI A0, A0, 0X16 ; scratch address
+    13156501
+    # ADDI A1, X0, 512 ; scratch size in bytes
+    93050020
+
+:backend_ClearScratch_loop
+    # SB X0, 0(A0) ; Write zero: s[i] = 0
+    23000500
+    # ADDI A0, A0, 1 ; Increment: i = i + 1
+    13051500
+    # ADDI A1, A1, -1 ; remaining bytes--
+    9385F5FF
+    # BNE A1, X0, BACKEND_CLEARSCRATCH_LOOP ; Keep looping
+    @backend_ClearScratch_loop 63900500
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # LD A0, 8(SP) ; restore a0
+    03358100
+    # LD A1, 16(SP) ; restore a1
+    83350101
+    # ADDI SP, SP, 24 ; Deallocate stack
+    13018101
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:backend_consume_token
+    # ADDI SP, SP, -8 ; Allocate stack
+    130181FF
+    # SD RA, 0(SP) ; protect ra
+    23301100
+
+:backend_consume_token_0
+    # BGE S2, S11, BACKEND_CONSUME_TOKEN_DONE ; Check bounds
+    @backend_consume_token_done 6350B901
+    # JAL RA, BACKEND_READ_BYTE ; Read byte into a0
+    $backend_Read_byte EF000000
+    # ADDI T1, X0, 9 ; Check for \t
+    13039000
+    # BEQ A0, T1, BACKEND_CONSUME_TOKEN_DONE ; Branch when condition is satisfied
+    @backend_consume_token_done 63006500
+    # ADDI T1, X0, 10 ; Check for \n
+    1303A000
+    # BEQ A0, T1, BACKEND_CONSUME_TOKEN_DONE ; Branch when condition is satisfied
+    @backend_consume_token_done 63006500
+    # ADDI T1, X0, 32 ; Check for ' '
+    13030002
+    # BEQ A0, T1, BACKEND_CONSUME_TOKEN_DONE ; Branch when condition is satisfied
+    @backend_consume_token_done 63006500
+    # ADDI T1, X0, 62 ; Check for >
+    1303E003
+    # BEQ A0, T1, BACKEND_CONSUME_TOKEN_DONE ; Branch when condition is satisfied
+    @backend_consume_token_done 63006500
+    # SB A0, 0(A1) ; Store char
+    2380A500
+    # ADDI A1, A1, 1 ; Point to next spot
+    93851500
+    # JAL X0, BACKEND_CONSUME_TOKEN_0 ; Continue looping
+    $backend_consume_token_0 6F000000
+
+:backend_consume_token_done
+    # SD X0, 0(A1) ; Pad with nulls
+    23B00500
+    # ADDI A1, A1, 8 ; Update the pointer
+    93858500
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # ADDI SP, SP, 8 ; Deallocate stack
+    13018100
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:backend_DoByte
+    # ADDI SP, SP, -16 ; Allocate stack
+    130101FF
+    # SD RA, 0(SP) ; protect ra
+    23301100
+    # SD A6, 8(SP) ; protect a6
+    23340101
+    # JAL RA, BACKEND_HEX ; Process hex, store it in a6
+    $backend_hex EF000000
+    # BLT A6, X0, BACKEND_DOBYTE_DONE ; Deal with unrecognized characters
+    @backend_DoByte_Done 63400800
+    # BNE S4, X0, BACKEND_DOBYTE_NOTTOGGLE ; Check if toggle is set
+    @backend_DoByte_NotToggle 63100A00
+    # BNE A1, X0, BACKEND_DOBYTE_1 ; check if we have to write
+    @backend_DoByte_1 63900500
+    # ADDI T0, X0, 255 ; First, calculate new shiftregister
+    9302F00F
+    # AND T0, S8, T0 ; sr_nextb = shiftregister & 0xff
+    B3725C00
+    # SRLIW S8, S8, 0X8 ; shiftregister >> 8
+    1B5C8C00
+    # XOR T0, T0, A6 ; hex(c) ^ sr_nextb
+    B3C20201
+    # SLLI T1, S5, 0X4 ; hold * 16
+    13934A00
+    # ADD A0, T0, T1 ; (hold * 16) + hex(c) ^ sr_nextb()
+    33856200
+    # JAL RA, BACKEND_WRITE_BYTE ; write it
+    $backend_write_byte EF000000
+
+:backend_DoByte_1
+    # ADDI S6, S6, 1 ; Increment IP
+    130B1B00
+    # BEQ A2, X0, BACKEND_DOBYTE_2 ; check if we have to update
+    @backend_DoByte_2 63000600
+
+:backend_DoByte_2b
+    # ADDI S5, X0, 0 ; hold = 0
+    930A0000
+    # JAL X0, BACKEND_DOBYTE_FLIPTOGGLE ; return
+    $backend_DoByte_FlipToggle 6F000000
+
+:backend_DoByte_NotToggle
+    # ADDI S5, A6, 0 ; hold = hex(c)
+    930A0800
+
+:backend_DoByte_FlipToggle
+    # XORI S4, S4, -1 ; Flip the toggle
+    134AFAFF
+
+:backend_DoByte_Done
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # LD A6, 8(SP) ; restore a6
+    03388100
+    # ADDI SP, SP, 16 ; Deallocate stack
+    13010101
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:backend_DoByte_2
+    # SLLI T1, S5, 0X4 ; hold * 16
+    13934A00
+    # ADD S5, T1, A6 ; hold = hold * 16 + hex(c)
+    B30A0301
+    # SLLI T1, S7, 0X8 ; tempword << 8
+    13938B00
+    # XOR S7, T1, S5 ; tempword = (tempword << 8) ^ hold
+    B34B5301
+    # ADDI S10, S10, 1 ; updates = updates + 1
+    130D1D00
+    # JAL X0, BACKEND_DOBYTE_2B ; Jump unconditionally to backend_DoByte_2b
+    $backend_DoByte_2b 6F000000
+
+:backend_hex
+    # ADDI SP, SP, -16 ; Allocate stack
+    130101FF
+    # SD RA, 0(SP) ; protect ra
+    23301100
+    # SD A1, 8(SP) ; protect a1
+    2334B100
+    # ADDI T1, X0, 35 ; deal with line comments starting with #
+    13033002
+    # BEQ A0, T1, BACKEND_ASCII_COMMENT ; a0 eq to '#'
+    @backend_ascii_comment 63006500
+    # ADDI T1, X0, 59 ; deal with line comments starting with ,
+    1303B003
+    # BEQ A0, T1, BACKEND_ASCII_COMMENT ; a0 eq to ','
+    @backend_ascii_comment 63006500
+    # ADDI T1, X0, 48 ; deal all ascii less than 0
+    13030003
+    # BLT A0, T1, BACKEND_ASCII_OTHER ; Branch when condition is satisfied
+    @backend_ascii_other 63406500
+    # ADDI T1, X0, 58 ; deal with 0-9
+    1303A003
+    # BLT A0, T1, BACKEND_ASCII_NUM ; Branch when condition is satisfied
+    @backend_ascii_num 63406500
+    # ADDI T1, X0, 65 ; deal with all ascii less than A
+    13031004
+    # BLT A0, T1, BACKEND_ASCII_OTHER ; Branch when condition is satisfied
+    @backend_ascii_other 63406500
+    # ADDI T1, X0, 71 ; deal with A-F
+    13037004
+    # BLT A0, T1, BACKEND_ASCII_HIGH ; Branch when condition is satisfied
+    @backend_ascii_high 63406500
+    # ADDI T1, X0, 97 ; deal with all ascii less than a
+    13031006
+    # BLT A0, T1, BACKEND_ASCII_OTHER ; Branch when condition is satisfied
+    @backend_ascii_other 63406500
+    # ADDI T1, X0, 103 ; deal with a-f
+    13037006
+    # BLT A0, T1, BACKEND_ASCII_LOW ; Branch when condition is satisfied
+    @backend_ascii_low 63406500
+    # JAL X0, BACKEND_ASCII_OTHER ; The rest that remains needs to be ignored
+    $backend_ascii_other 6F000000
+
+:backend_ascii_num
+    # ADDI T1, X0, 48 ; '0' -> 0
+    13030003
+    # SUB A6, A0, T1 ; Update arithmetic value
+    33086540
+    # JAL X0, BACKEND_HEX_RETURN ; return
+    $backend_hex_return 6F000000
+
+:backend_ascii_low
+    # ADDI T1, X0, 87 ; 'a' -> 0xA
+    13037005
+    # SUB A6, A0, T1 ; Update arithmetic value
+    33086540
+    # JAL X0, BACKEND_HEX_RETURN ; return
+    $backend_hex_return 6F000000
+
+:backend_ascii_high
+    # ADDI T1, X0, 55 ; 'A' -> 0xA
+    13037003
+    # SUB A6, A0, T1 ; Update arithmetic value
+    33086540
+    # JAL X0, BACKEND_HEX_RETURN ; return
+    $backend_hex_return 6F000000
+
+:backend_ascii_other
+    # ADDI A6, X0, -1 ; Return -1
+    1308F0FF
+    # JAL X0, BACKEND_HEX_RETURN ; return
+    $backend_hex_return 6F000000
+
+:backend_ascii_comment
+    # BGE S2, S11, BACKEND_ASCII_COMMENT_DONE ; Check bounds
+    @backend_ascii_comment_done 6350B901
+    # JAL RA, BACKEND_READ_BYTE ; Call backend_Read_byte
+    $backend_Read_byte EF000000
+    # ADDI T1, X0, 13 ; CR
+    1303D000
+    # BEQ A0, T1, BACKEND_ASCII_COMMENT_DONE ; Branch when condition is satisfied
+    @backend_ascii_comment_done 63006500
+    # ADDI T1, X0, 10 ; LF
+    1303A000
+    # BNE A0, T1, BACKEND_ASCII_COMMENT ; Keep reading comment
+    @backend_ascii_comment 63106500
+
+:backend_ascii_comment_done
+    # ADDI A6, X0, -1 ; Return -1
+    1308F0FF
+
+:backend_hex_return
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # LD A1, 8(SP) ; restore a1
+    83358100
+    # ADDI SP, SP, 16 ; Deallocate stack
+    13010101
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:backend_Read_byte
+    # LB A0, 0(S2) ; Load byte from buffer
+    03050900
+    # ADDI S2, S2, 1 ; Advance buffer pointer
+    13091900
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:backend_read_uart
+    # LUI T0, 0X10000 ; UART_LSR
+    B7020010
+    # ADDIW T0, T0, 5 ; UART_LSR
+    9B825200
+
+:backend_poll_rx
+    # LB A0, 0(T0) ; Read LSR
+    03850200
+    # ANDI A0, A0, 1 ; Check bit 0 (Data Ready)
+    13751500
+    # BEQ A0, X0, BACKEND_POLL_RX ; If no data ready, keep polling
+    @backend_poll_rx 63000500
+    # LUI T0, 0X10000 ; UART_BASE
+    B7020010
+    # LB A0, 0(T0) ; Read received byte
+    03850200
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:backend_GetTarget
+    # ADDI SP, SP, -8 ; Allocate stack
+    130181FF
+    # SD RA, 0(SP) ; protect ra
+    23301100
+    # ADDI T0, S1, 0 ; grab jump_table
+    93820400
+
+:backend_GetTarget_loop_0
+    # ADDIW T1, X0, 513 ; scratch
+    1B031020
+    # SLLI T1, T1, 0X16 ; scratch
+    13136301
+    # LD T2, 16(T0) ; I->name
+    83B30201
+
+:backend_GetTarget_loop
+    # LBU T4, 0(T2) ; I->name[i]
+    83CE0300
+    # LBU T3, 0(T1) ; scratch[i]
+    034E0300
+    # BNE T3, T4, BACKEND_GETTARGET_MISS ; strings don't match
+    @backend_GetTarget_miss 6310DE01
+    # ADDI T1, T1, 1 ; Look at the next char
+    13031300
+    # ADDI T2, T2, 1 ; Advance algorithm state
+    93831300
+    # BNE T4, X0, BACKEND_GETTARGET_LOOP ; Loop until zero (end of string)
+    @backend_GetTarget_loop 63900E00
+    # JAL X0, BACKEND_GETTARGET_DONE ; We have a match
+    $backend_GetTarget_done 6F000000
+
+:backend_GetTarget_miss
+    # LD T0, 0(T0) ; I = I->next
+    83B20200
+    # BEQ T0, X0, BACKEND_FAIL ; Abort, no match found
+    @backend_Fail 63800200
+    # JAL X0, BACKEND_GETTARGET_LOOP_0 ; Try another label
+    $backend_GetTarget_loop_0 6F000000
+
+:backend_GetTarget_done
+    # ADDI A0, T0, 8 ; Get target address
+    13858200
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # ADDI SP, SP, 8 ; Deallocate stack
+    13018100
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:backend_StoreLabel
+    # ADDI SP, SP, -8 ; Allocate stack
+    130181FF
+    # SD RA, 0(SP) ; protect ra
+    23301100
+    # ADDI A0, S9, 0 ; struct entry
+    13850C00
+    # ADDI S9, S9, 24 ; calloc
+    938C8C01
+    # SD S6, 8(A0) ; entry->target = ip
+    23346501
+    # SD S1, 0(A0) ; entry->next = jump_table
+    23309500
+    # ADDI S1, A0, 0 ; jump_table = entry
+    93040500
+    # SD S9, 16(A0) ; entry->name = token
+    23389501
+    # ADDI A1, S9, 0 ; Write after struct
+    93850C00
+    # JAL RA, BACKEND_CONSUME_TOKEN ; Collect string
+    $backend_consume_token EF000000
+    # ADDI S9, A1, 0 ; update HEAP
+    938C0500
+    # LD RA, 0(SP) ; restore ra
+    83300100
+    # ADDI SP, SP, 8 ; Deallocate stack
+    13018100
+    # JAL X0, BACKEND_FIRST_PASS_LOOP ; return
+    $backend_First_pass_loop 6F000000
+
+:backend_write_byte
+    # SB A0, 0(A7) ; Write byte to output buffer
+    2380A800
+    # ADDI A7, A7, 1 ; Advance output pointer
+    93881800
+    # JALR X0, 0(RA) ; return
+    67800000
+
+:backend_Fail
+    # JAL X0, BACKEND_FAIL ; Halt (infinite loop) - indicates an error
+    $backend_Fail 6F000000

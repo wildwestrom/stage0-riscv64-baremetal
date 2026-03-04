@@ -19,7 +19,7 @@
 # This prototype may not match the commented hex
 
     .global _start
-    .section .text.bios
+    .text
 
 _start:
     # Set up stack (same absolute address as all programs)

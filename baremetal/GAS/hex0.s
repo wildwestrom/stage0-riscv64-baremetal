@@ -16,14 +16,13 @@
 # along with stage0.  If not, see <http://www.gnu.org/licenses/>.
 
     .global _start
-    .section .text
+    .text
 
 _start:
-    # Set up stack (grow downward from a safe location in RAM)
-    la sp, stack_top
-
     # Set up memory pointer for storing hex bytes
     la s2, code_buffer  # bp -> s2: pointer to where we store bytes
+    # Set up stack above code buffer and within executable bounds.
+    addi sp, s2, 1024
 
     # Initialize toggle (di -> s1)
     li s1, 1          # toggle: 1 = first nibble, 0 = second nibble
@@ -183,14 +182,21 @@ execute_code:
 done:
     # Halt (infinite loop)
     j done
-
-    .section .bss
-    .balign 4
 code_buffer:
-    .space 0x1000
-
-    .balign 16
-stack_bottom:
-    .space 0x1000
-stack_top:
-
+    # Minimal reserved window for runtime-assembled bytes.
+    addi zero, zero, 0
+    addi zero, zero, 0
+    addi zero, zero, 0
+    addi zero, zero, 0
+    addi zero, zero, 0
+    addi zero, zero, 0
+    addi zero, zero, 0
+    addi zero, zero, 0
+    addi zero, zero, 0
+    addi zero, zero, 0
+    addi zero, zero, 0
+    addi zero, zero, 0
+    addi zero, zero, 0
+    addi zero, zero, 0
+    addi zero, zero, 0
+    addi zero, zero, 0
