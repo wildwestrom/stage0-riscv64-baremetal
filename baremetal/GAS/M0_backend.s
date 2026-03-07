@@ -53,7 +53,7 @@ M0_backend_assemble_and_exec:
     # Initialize globals
     li s4, -1                    # Toggle
     li s5, 0                     # Hold
-    li s6, 0                     # Instruction Pointer (relative)
+    li s6, 0x80300000            # Instruction Pointer / output buffer base
 
     jal ClearScratch             # Zero scratch
     jal First_pass               # First pass
@@ -64,7 +64,7 @@ M0_backend_assemble_and_exec:
     # Initialize globals
     li s4, -1                    # Toggle
     li s5, 0                     # Hold
-    li s6, 0                     # Instruction Pointer
+    li s6, 0x80300000            # Instruction Pointer / output buffer base
     li s7, 0                     # tempword
     li s8, 0                     # Shift register
 

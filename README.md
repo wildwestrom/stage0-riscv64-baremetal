@@ -73,14 +73,14 @@ Working chain:
 - Send execute signal (`0x04`).
 - Feed `M0.hex2`
 - Send execute signal (`0x04`).
-- Feed `echo.M1`.
+- Feed `derzforth.M1`.
 - Send execute signal (`0x04`).
-- Send `test` text.
-- Confirtm `test` text gets echoed back out.
+- Send `foo`, confirm ` ?`.
+- Send `key emit`, then `A`, confirm `A ok`.
 
 `just test` verifies this full bootstrap chain.
 
-The assembly version of `hex0` is kept only as a reference artifact for comparison/debugging. It is not part of the real bootstrap chain.
+We keep several reference artifact for comparison/debugging that are not part of the real bootstrap chain.
 
 ## Debugging
 

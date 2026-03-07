@@ -1587,8 +1587,12 @@
     130AF0FF
     # ADDI S5, X0, 0 ; Hold
     930A0000
-    # ADDI S6, X0, 0 ; Instruction Pointer (relative)
-    130B0000
+    # LUI S6, 0X1 ; Instruction Pointer / output buffer base
+    371B0000
+    # ADDIW S6, S6, -2045 ; Instruction Pointer / output buffer base
+    1B0B3B80
+    # SLLI S6, S6, 0X14 ; Instruction Pointer / output buffer base
+    131B4B01
     # JAL RA, BACKEND_CLEARSCRATCH ; Zero scratch
     $backend_ClearScratch EF000000
     # JAL RA, BACKEND_FIRST_PASS ; First pass
@@ -1599,8 +1603,12 @@
     130AF0FF
     # ADDI S5, X0, 0 ; Hold
     930A0000
-    # ADDI S6, X0, 0 ; Instruction Pointer
-    130B0000
+    # LUI S6, 0X1 ; Instruction Pointer / output buffer base
+    371B0000
+    # ADDIW S6, S6, -2045 ; Instruction Pointer / output buffer base
+    1B0B3B80
+    # SLLI S6, S6, 0X14 ; Instruction Pointer / output buffer base
+    131B4B01
     # ADDI S7, X0, 0 ; tempword
     930B0000
     # ADDI S8, X0, 0 ; Shift register

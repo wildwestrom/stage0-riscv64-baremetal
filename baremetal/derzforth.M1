@@ -1,0 +1,575 @@
+## Copyright (C) 2026 Christian Westrom
+##
+## Hand-written M1 port of baremetal/GAS/derzforth.s for the QEMU virt board.
+## Concatenate baremetal/riscv64_defs.M1 before assembling with M0.
+
+# Jump to main so helper routines can live at the top of the file.
+:_start
+    $main JAL
+
+
+# QEMU virt board support
+:serial_init
+    RETURN
+
+:serial_getc
+    RD_T0 ~0x10000000 LUI
+    RD_T0 RS1_T0 !5 ADDIW
+:serial_getc_wait
+    RD_A0 RS1_T0 LB
+    RD_A0 RS1_A0 !1 ANDI
+    RS1_A0 @serial_getc_wait BEQZ
+    RD_T0 ~0x10000000 LUI
+    RD_A0 RS1_T0 LBU
+    RETURN
+
+:serial_putc
+    RD_T0 ~0x10000000 LUI
+    RD_T0 RS1_T0 !5 ADDIW
+:serial_putc_wait
+    RD_T1 RS1_T0 LB
+    RD_T1 RS1_T1 !0x20 ANDI
+    RS1_T1 @serial_putc_wait BEQZ
+    RD_T0 ~0x10000000 LUI
+    RS1_T0 RS2_A0 SB
+    RETURN
+
+
+# Func: memclr
+# Arg: a0 = buffer addr
+# Arg: a1 = buffer size
+:memclr
+    RS1_A1 @memclr_done BEQZ
+    RS1_A0 SB
+    RD_A0 RS1_A0 !1 ADDI
+    RD_A1 RS1_A1 !-1 ADDI
+    $memclr JAL
+:memclr_done
+    RETURN
+
+
+# Func: memcpy
+# Arg: a0 = src buffer addr
+# Arg: a1 = dst buffer addr
+# Arg: a2 = buffer size
+:memcpy
+    RS1_A2 @memcpy_done BEQZ
+    RD_T0 RS1_A0 LB
+    RS1_A1 RS2_T0 SB
+    RD_A0 RS1_A0 !1 ADDI
+    RD_A1 RS1_A1 !1 ADDI
+    RD_A2 RS1_A2 !-1 ADDI
+    $memcpy JAL
+:memcpy_done
+    RETURN
+
+
+# Func: strtok
+# Arg: a0 = buffer addr
+# Arg: a1 = buffer size
+# Ret: a0 = token addr
+# Ret: a1 = token size
+# Ret: a2 = bytes consumed
+:strtok
+    RD_T0 !0x20 ADDI
+    RD_T2 RS1_A0 MV
+:strtok_skip_whitespace
+    RS1_A1 @strtok_not_found BEQZ
+    RD_T1 RS1_A0 LBU
+    RS1_T0 RS2_T1 @strtok_scan BLTU
+    RD_A0 RS1_A0 !1 ADDI
+    RD_A1 RS1_A1 !-1 ADDI
+    $strtok_skip_whitespace JAL
+:strtok_scan
+    RD_T3 RS1_A0 MV
+:strtok_scan_loop
+    RS1_A1 @strtok_not_found BEQZ
+    RD_T1 RS1_A0 LBU
+    RS1_T0 RS2_T1 @strtok_found BGEU
+    RD_A0 RS1_A0 !1 ADDI
+    RD_A1 RS1_A1 !-1 ADDI
+    $strtok_scan_loop JAL
+:strtok_found
+    RD_A2 RS1_A0 RS2_T2 SUB
+    RD_A2 RS1_A2 !1 ADDI
+    RD_A1 RS1_A0 RS2_T3 SUB
+    RD_A0 RS1_T3 MV
+    RETURN
+:strtok_not_found
+    RD_A0 ADDI
+    RD_A1 ADDI
+    RD_A2 ADDI
+    RETURN
+
+
+# Func: lookup
+# Arg: a0 = addr of latest entry in word dict
+# Arg: a1 = hash of word name to lookup
+# Ret: a0 = addr of found word (0 if not found)
+:lookup
+    RS1_A0 @lookup_not_found BEQZ
+    RD_T0 RS1_A0 !4 LW
+
+    RD_T1 ~0x40000000 LUI
+    RD_T1 RS1_T0 RS2_T1 AND
+    RS1_T1 @lookup_next BNEZ
+
+    RD_T1 !-3 ADDIW
+    RD_T1 RS1_T1 RS2_X30 SLLI
+    RD_T1 RS1_T1 !-1 ADDI
+    RD_T0 RS1_T0 RS2_T1 AND
+    RS1_T0 RS2_A1 @lookup_found BEQ
+:lookup_next
+    RD_A0 RS1_A0 LWU
+    $lookup JAL
+:lookup_found
+    RETURN
+:lookup_not_found
+    RD_A0 ADDI
+    RETURN
+
+
+# Func: djb2_hash
+# Arg: a0 = buffer addr
+# Arg: a1 = buffer size
+# Ret: a0 = hash value
+:djb2_hash
+    RD_T0 ~0x1505 LUI
+    RD_T0 RS1_T0 !0x1505 ADDIW
+:djb2_hash_loop
+    RS1_A1 @djb2_hash_done BEQZ
+    RD_T2 RS1_A0 LBU
+    RD_T1 RS1_T0 RS2_X5 SLLIW
+    RD_T0 RS1_T1 RS2_T0 ADDW
+    RD_T0 RS1_T0 RS2_T2 ADDW
+    RD_A0 RS1_A0 !1 ADDI
+    RD_A1 RS1_A1 !-1 ADDI
+    $djb2_hash_loop JAL
+:djb2_hash_done
+    RD_T0 RS1_T0 !32 SLLI
+    RD_T0 RS1_T0 !32 SRLI
+    RD_T1 !-3 ADDIW
+    RD_T1 RS1_T1 RS2_X30 SLLI
+    RD_T1 RS1_T1 !-1 ADDI
+    RD_A0 RS1_T0 RS2_T1 AND
+    RETURN
+
+
+###
+### interpreter
+###
+
+:main
+    RD_A0 ~0x1C200 LUI
+    RD_A0 RS1_A0 !0x1C200 ADDIW
+    RD_RA $serial_init JAL
+
+    RD_S6 ~here AUIPC
+    RD_S6 RS1_S6 !here ADDI
+    RD_S7 ~latest AUIPC
+    RD_S7 RS1_S7 !latest ADDI
+    $reset JAL
+
+:error
+    RD_A0 !0x20 ADDI
+    RD_RA $serial_putc JAL
+    RD_A0 !0x3F ADDI
+    RD_RA $serial_putc JAL
+    RD_A0 !0x0A ADDI
+    RD_RA $serial_putc JAL
+
+:reset
+    RD_S0 ADDI
+    RD_S1 ADDI
+
+    # sp = 0x80003800
+    RD_SP ~0x20000 LUI
+    RD_SP RS1_SP !1 ADDIW
+    RD_SP RS1_SP RS2_X14 SLLI
+    RD_SP RS1_SP !-2048 ADDI
+
+    # tp = 0x80003400
+    RD_TP ~0x80000 LUI
+    RD_TP RS1_TP !3 ADDIW
+    RD_TP RS1_TP RS2_X12 SLLI
+    RD_TP RS1_TP !0x400 ADDI
+
+    # s2 = 0x80003000
+    RD_S2 ~0x80000 LUI
+    RD_S2 RS1_S2 !3 ADDIW
+    RD_S2 RS1_S2 RS2_X12 SLLI
+
+    $interpreter JAL
+
+:interpreter_ok
+    RD_A0 !0x20 ADDI
+    RD_RA $serial_putc JAL
+    RD_A0 !0x6F ADDI
+    RD_RA $serial_putc JAL
+    RD_A0 !0x6B ADDI
+    RD_RA $serial_putc JAL
+    RD_A0 !0x0A ADDI
+    RD_RA $serial_putc JAL
+
+:interpreter
+:tib_clear
+    RD_A0 RS1_S2 MV
+    RD_A1 !0x400 ADDI
+    RD_RA $memclr JAL
+
+:tib_init
+    RD_S3 RS1_S2 MV
+    RD_S4 ADDI
+    RD_S5 ADDI
+
+:interpreter_repl
+    RD_RA $serial_getc JAL
+    RD_RA $serial_putc JAL
+
+    RD_T0 !0x5C ADDI
+    RS1_A0 RS2_T0 @interpreter_skip_comment BEQ
+
+    RD_T0 !0x28 ADDI
+    RS1_A0 RS2_T0 @interpreter_skip_parens BEQ
+
+    RD_T0 !0x08 ADDI
+    RS1_A0 RS2_T0 @interpreter_repl_char BNE
+    RS1_S4 @interpreter_repl BEQZ
+
+    RD_S4 RS1_S4 !-1 ADDI
+    RD_A0 !0x20 ADDI
+    RD_RA $serial_putc JAL
+    RD_A0 !0x08 ADDI
+    RD_RA $serial_putc JAL
+    $interpreter_repl JAL
+
+:interpreter_skip_comment
+    RD_RA $serial_getc JAL
+    RD_RA $serial_putc JAL
+    RD_T0 !0x0A ADDI
+    RS1_A0 RS2_T0 @interpreter_skip_comment BNE
+    $interpreter_repl JAL
+
+:interpreter_skip_parens
+    RD_RA $serial_getc JAL
+    RD_RA $serial_putc JAL
+    RD_T0 !0x29 ADDI
+    RS1_A0 RS2_T0 @interpreter_skip_parens BNE
+    $interpreter_repl JAL
+
+:interpreter_repl_char
+    RD_T0 RS1_S3 RS2_S4 ADD
+    RD_T1 !0x400 ADDI
+    RS1_S4 RS2_T1 @error BGE
+    RS1_T0 RS2_A0 SB
+    RD_S4 RS1_S4 !1 ADDI
+    RD_T0 !0x0A ADDI
+    RS1_A0 RS2_T0 @interpreter_interpret BEQ
+    $interpreter_repl JAL
+
+:interpreter_interpret
+    RD_A0 RS1_S3 RS2_S5 ADD
+    RD_A1 RS1_S4 RS2_S5 SUB
+    RD_RA $strtok JAL
+    RS1_A0 @interpreter_ok BEQZ
+    RD_S5 RS1_S5 RS2_A2 ADD
+
+    RD_RA $djb2_hash JAL
+
+    RD_A1 RS1_A0 MV
+    RD_A0 RS1_S7 MV
+    RD_RA $lookup JAL
+    RS1_A0 @error BEQZ
+
+    RD_T0 RS1_A0 !4 LW
+    RD_T1 !1 ADDIW
+    RD_T1 RS1_T1 RS2_X31 SLLI
+    RD_T0 RS1_T0 RS2_T1 AND
+
+    RS1_T0 @interpreter_execute BNEZ
+    RS1_S1 @interpreter_execute BEQZ
+
+:interpreter_compile
+    RD_T0 RS1_A0 !8 ADDI
+    RS1_S6 RS2_T0 SW
+    RD_S6 RS1_S6 !4 ADDI
+    $interpreter_interpret JAL
+
+:interpreter_execute
+    RD_GP ~interpreter_addr_addr AUIPC
+    RD_GP RS1_GP !interpreter_addr_addr ADDI
+    RD_S0 RS1_A0 !8 ADDI
+    RD_T0 RS1_S0 LWU
+    RS1_T0 JALR
+
+<
+:interpreter_addr
+    &interpreter_interpret
+:interpreter_addr_addr
+    &interpreter_addr
+
+
+# Standard forth routine: next
+:next
+    RD_S0 RS1_GP LWU
+    RD_GP RS1_GP !4 ADDI
+    RD_T0 RS1_S0 LWU
+    RS1_T0 JALR
+
+
+# Standard forth routine: enter
+:enter
+    RS1_TP RS2_GP SW
+    RD_TP RS1_TP !4 ADDI
+    RD_GP RS1_S0 !4 ADDI
+    $next JAL
+
+
+###
+### dictionary
+###
+
+<
+:word_exit
+    %0
+    %0x3C967E3F
+:code_exit
+    &body_exit
+:body_exit
+    RD_TP RS1_TP !-4 ADDI
+    RD_GP RS1_TP LWU
+    $next JAL
+
+<
+:word_colon
+    &word_exit
+    %0x0002B5DF
+:code_colon
+    &body_colon
+:body_colon
+    RD_A0 RS1_S3 RS2_S5 ADD
+    RD_A1 RS1_S4 RS2_S5 SUB
+    RD_RA $strtok JAL
+    RS1_A0 @error BEQZ
+    RD_S5 RS1_S5 RS2_A2 ADD
+
+    RD_RA $djb2_hash JAL
+
+    RD_T0 ~0x40000000 LUI
+    RD_A0 RS1_A0 RS2_T0 OR
+
+    RS1_S6 RS2_S7 SW
+    RS1_S6 RS2_A0 @4 SW
+    RD_S7 RS1_S6 MV
+    RD_S6 RS1_S6 !8 ADDI
+
+    RD_T0 ~enter AUIPC
+    RD_T0 RS1_T0 !enter ADDI
+    RS1_S6 RS2_T0 SW
+    RD_S6 RS1_S6 !4 ADDI
+    RD_S1 !1 ADDI
+    $next JAL
+
+<
+:word_semi
+    &word_colon
+    %0x8002B5E0
+:code_semi
+    &body_semi
+:body_semi
+    RD_T0 RS1_S7 !4 LW
+    RD_T1 ~0xC0000000 LUI
+    RD_T1 RS1_T1 !-1 ADDIW
+    RD_T0 RS1_T0 RS2_T1 AND
+    RS1_S7 RS2_T0 @4 SW
+
+    RD_T0 ~code_exit AUIPC
+    RD_T0 RS1_T0 !code_exit ADDI
+    RS1_S6 RS2_T0 SW
+    RD_S6 RS1_S6 !4 ADDI
+    RD_S1 ADDI
+    $next JAL
+
+<
+:word_at
+    &word_semi
+    %0x0002B5E5
+:code_at
+    &body_at
+:body_at
+    RD_SP RS1_SP !-4 ADDI
+    RD_T0 RS1_SP LWU
+    RD_T0 RS1_T0 LW
+    RS1_SP RS2_T0 SW
+    RD_SP RS1_SP !4 ADDI
+    $next JAL
+
+<
+:word_ex
+    &word_at
+    %0x0002B5C6
+:code_ex
+    &body_ex
+:body_ex
+    RD_SP RS1_SP !-8 ADDI
+    RD_T0 RS1_SP !4 LWU
+    RD_T1 RS1_SP LW
+    RS1_T0 RS2_T1 SW
+    $next JAL
+
+<
+:word_spat
+    &word_ex
+    %0x0B88AAC8
+:code_spat
+    &body_spat
+:body_spat
+    RD_T0 RS1_SP MV
+    RD_T0 RS1_T0 !-4 ADDI
+    RS1_SP RS2_T0 SW
+    RD_SP RS1_SP !4 ADDI
+    $next JAL
+
+<
+:word_rpat
+    &word_spat
+    %0x0B88A687
+:code_rpat
+    &body_rpat
+:body_rpat
+    RD_T0 RS1_TP MV
+    RD_T0 RS1_T0 !-4 ADDI
+    RS1_SP RS2_T0 SW
+    RD_SP RS1_SP !4 ADDI
+    $next JAL
+
+<
+:word_zeroeq
+    &word_rpat
+    %0x005970B2
+:code_zeroeq
+    &body_zeroeq
+:body_zeroeq
+    RD_SP RS1_SP !-4 ADDI
+    RD_T0 RS1_SP LW
+    RD_T1 ADDI
+    RS1_T0 @notzero BNEZ
+    RD_T1 RS1_T1 !-1 ADDI
+:notzero
+    RS1_SP RS2_T1 SW
+    RD_SP RS1_SP !4 ADDI
+    $next JAL
+
+<
+:word_plus
+    &word_zeroeq
+    %0x0002B5D0
+:code_plus
+    &body_plus
+:body_plus
+    RD_SP RS1_SP !-8 ADDI
+    RD_T0 RS1_SP !4 LW
+    RD_T1 RS1_SP LW
+    RD_T0 RS1_T0 RS2_T1 ADD
+    RS1_SP RS2_T0 SW
+    RD_SP RS1_SP !4 ADDI
+    $next JAL
+
+<
+:word_nand
+    &word_plus
+    %0x3C9B0C66
+:code_nand
+    &body_nand
+:body_nand
+    RD_SP RS1_SP !-8 ADDI
+    RD_T0 RS1_SP !4 LW
+    RD_T1 RS1_SP LW
+    RD_T0 RS1_T0 RS2_T1 AND
+    RD_T0 RS1_T0 NOT
+    RS1_SP RS2_T0 SW
+    RD_SP RS1_SP !4 ADDI
+    $next JAL
+
+<
+:word_state
+    &word_nand
+    %0x10614A06
+:code_state
+    &body_state
+:body_state
+    RS1_SP RS2_S1 SW
+    RD_SP RS1_SP !4 ADDI
+    $next JAL
+
+<
+:word_tib
+    &word_state
+    %0x0B88AE44
+:code_tib
+    &body_tib
+:body_tib
+    RS1_SP RS2_S2 SW
+    RD_SP RS1_SP !4 ADDI
+    $next JAL
+
+<
+:word_toin
+    &word_tib
+    %0x0B87C89A
+:code_toin
+    &body_toin
+:body_toin
+    RS1_SP RS2_S5 SW
+    RD_SP RS1_SP !4 ADDI
+    $next JAL
+
+<
+:word_here
+    &word_toin
+    %0x3C97D3A9
+:code_here
+    &body_here
+:body_here
+    RS1_SP RS2_S6 SW
+    RD_SP RS1_SP !4 ADDI
+    $next JAL
+
+<
+:word_latest
+    &word_here
+    %0x0AE8CA72
+:code_latest
+    &body_latest
+:body_latest
+    RS1_SP RS2_S7 SW
+    RD_SP RS1_SP !4 ADDI
+    $next JAL
+
+<
+:word_key
+    &word_latest
+    %0x0B88878E
+:code_key
+    &body_key
+:body_key
+    RD_RA $serial_getc JAL
+    RS1_SP RS2_A0 SW
+    RD_SP RS1_SP !4 ADDI
+    $next JAL
+
+<
+:latest
+:word_emit
+    &word_key
+    %0x3C964F74
+:code_emit
+    &body_emit
+:body_emit
+    RD_SP RS1_SP !-4 ADDI
+    RD_A0 RS1_SP LW
+    RD_RA $serial_putc JAL
+    $next JAL
+
+<
+:here

@@ -8,6 +8,7 @@ hex0_c := "baremetal/high_level_prototype/stage0_monitor.c"
 hex0_ld := "baremetal/high_level_prototype/stage0_monitor.ld"
 m0_hex2 := "baremetal/M0.hex2"
 derzforth_src := "baremetal/GAS/derzforth.s"
+derzforth_m1_src := "baremetal/derzforth.M1"
 derzforth_elf := "build/derzforth.elf"
 asflags := "-march=rv64i -mabi=lp64"
 asflags_m0 := "-march=rv64i -mabi=lp64 --defsym M0_HEAP_BASE=0x80100000 --defsym M0_INPUT_BASE=0x80200000 --defsym M0_STACK_TOP=0x80500000"
@@ -25,7 +26,7 @@ test: test_full_chain
 test_full_chain: hex0_bin
   bash -euxo pipefail -c '\
     mkdir -p {{build_dir}}; \
-    rm -f {{build_dir}}/full_chain_echo.out {{build_dir}}/full_chain_echo.ok; \
+    rm -f {{build_dir}}/full_chain_derzforth.out {{build_dir}}/full_chain_derzforth.ok; \
     status=0; \
     ( \
       cat baremetal/hex0.hex0; \
@@ -36,13 +37,15 @@ test_full_chain: hex0_bin
       printf "\x04"; \
       cat {{m0_hex2}}; \
       printf "\x04"; \
-      cat uart_echo/echo.M1; \
+      cat baremetal/riscv64_defs.M1 {{derzforth_m1_src}}; \
       printf "\x04"; \
-      printf "test"; \
-    ) | timeout "${TIMEOUT_FULL_CHAIN:-10.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{build_dir}}/hex0.bin > {{build_dir}}/full_chain_echo.out 2>/dev/null || status=$?; \
+      printf "\nfoo\nkey emit\nA\n"; \
+    ) | timeout "${TIMEOUT_FULL_CHAIN:-20.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{build_dir}}/hex0.bin > {{build_dir}}/full_chain_derzforth.out 2>/dev/null || status=$?; \
     [[ "$status" -eq 0 || "$status" -eq 124 ]]; \
-    printf "test" | cmp -s - {{build_dir}}/full_chain_echo.out; \
-    touch {{build_dir}}/full_chain_echo.ok \
+    grep -Fqx " ok" {{build_dir}}/full_chain_derzforth.out; \
+    grep -Fqx " ?" {{build_dir}}/full_chain_derzforth.out; \
+    grep -Fqx "A ok" {{build_dir}}/full_chain_derzforth.out; \
+    touch {{build_dir}}/full_chain_derzforth.ok \
   '
 
 debug_hex0:
@@ -74,6 +77,8 @@ test_derzforth: derzforth_elf
     grep -Fqx "A ok" {{build_dir}}/derzforth.out; \
     touch {{build_dir}}/derzforth.ok \
   '
+
+test_derzforth_m1: test_full_chain
 
 clean:
   rm -rf {{build_dir}}
