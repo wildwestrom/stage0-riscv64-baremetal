@@ -21,35 +21,37 @@ hex0_bin:
 test: test_full_chain
 
 test_full_chain: hex0_bin
-  #!/usr/bin/env bash
-  mkdir -p {{build_dir}}
-  rm -f {{build_dir}}/full_chain_echo.out {{build_dir}}/full_chain_echo.ok
-  status=0
-  (
-    cat baremetal/hex0.hex0
-    printf '\x04'
-    cat baremetal/hex1.hex0
-    printf '\x04'
-    cat baremetal/hex2.hex1
-    printf '\x04'
-    cat {{m0_hex2}}
-    printf '\x04'
-    cat uart_echo/echo.M1
-    printf '\x04'
-    printf 'test'
-  ) | timeout "${TIMEOUT_FULL_CHAIN:-10.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{build_dir}}/hex0.bin > {{build_dir}}/full_chain_echo.out 2>/dev/null || status=$?
-  [[ "$status" -eq 0 || "$status" -eq 124 ]]
-  printf 'test' | cmp -s - {{build_dir}}/full_chain_echo.out
-  touch {{build_dir}}/full_chain_echo.ok
+  bash -euxo pipefail -c '\
+    mkdir -p {{build_dir}}; \
+    rm -f {{build_dir}}/full_chain_echo.out {{build_dir}}/full_chain_echo.ok; \
+    status=0; \
+    ( \
+      cat baremetal/hex0.hex0; \
+      printf "\x04"; \
+      cat baremetal/hex1.hex0; \
+      printf "\x04"; \
+      cat baremetal/hex2.hex1; \
+      printf "\x04"; \
+      cat {{m0_hex2}}; \
+      printf "\x04"; \
+      cat uart_echo/echo.M1; \
+      printf "\x04"; \
+      printf "test"; \
+    ) | timeout "${TIMEOUT_FULL_CHAIN:-10.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{build_dir}}/hex0.bin > {{build_dir}}/full_chain_echo.out 2>/dev/null || status=$?; \
+    [[ "$status" -eq 0 || "$status" -eq 124 ]]; \
+    printf "test" | cmp -s - {{build_dir}}/full_chain_echo.out; \
+    touch {{build_dir}}/full_chain_echo.ok \
+  '
 
 debug_hex0:
-  #!/usr/bin/env bash
-  mkdir -p {{build_dir}}
-  {{as}} {{asflags}} baremetal/GAS/hex0.s -o {{build_dir}}/hex0.o
-  {{cc}} {{ldflags_debug}} {{build_dir}}/hex0.o -o {{build_dir}}/hex0.debug.elf
-  rm -f qemu-dbg.in qemu-dbg.out
-  mkfifo qemu-dbg.in qemu-dbg.out
-  exec qemu-system-riscv64-purecap -nographic -monitor none -serial pipe:qemu-dbg -machine virt -bios none -kernel {{build_dir}}/hex0.debug.elf -gdb tcp::1234
+  bash -euxo pipefail -c '\
+    mkdir -p {{build_dir}}; \
+    {{as}} {{asflags}} baremetal/GAS/hex0.s -o {{build_dir}}/hex0.o; \
+    {{cc}} {{ldflags_debug}} {{build_dir}}/hex0.o -o {{build_dir}}/hex0.debug.elf; \
+    rm -f qemu-dbg.in qemu-dbg.out; \
+    mkfifo qemu-dbg.in qemu-dbg.out; \
+    exec qemu-system-riscv64-purecap -nographic -monitor none -serial pipe:qemu-dbg -machine virt -bios none -kernel {{build_dir}}/hex0.debug.elf -gdb tcp::1234 \
+  '
 
 clean:
   rm -rf {{build_dir}}
