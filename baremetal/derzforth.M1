@@ -34,6 +34,14 @@
     RS1_T0 RS2_A0 SB
     RETURN
 
+:qemu_poweroff
+    RD_T0 ~0x00100000 LUI
+    RD_T1 ~0x5555 LUI
+    RD_T1 RS1_T1 !0x555 ADDIW
+    RS1_T0 RS2_T1 SW
+:qemu_poweroff_wait
+    $qemu_poweroff_wait JAL
+
 
 # Func: memclr
 # Arg: a0 = buffer addr
@@ -559,7 +567,6 @@
     $next JAL
 
 <
-:latest
 :word_emit
     &word_key
     %0x3C964F74
@@ -569,6 +576,17 @@
     RD_SP RS1_SP !-4 ADDI
     RD_A0 RS1_SP LW
     RD_RA $serial_putc JAL
+    $next JAL
+
+<
+:latest
+:word_bye
+    &word_emit
+    %0x0B8863C5
+:code_bye
+    &body_bye
+:body_bye
+    RD_RA $qemu_poweroff JAL
     $next JAL
 
 <

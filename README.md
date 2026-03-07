@@ -77,6 +77,7 @@ Working chain:
 - Send execute signal (`0x04`).
 - Send `foo`, confirm ` ?`.
 - Send `key emit`, then `A`, confirm `A ok`.
+- Send `bye` to power off QEMU immediately when the test is done.
 
 `just test` verifies this full bootstrap chain.
 

@@ -39,9 +39,9 @@ test_full_chain: hex0_bin
       printf "\x04"; \
       cat baremetal/riscv64_defs.M1 {{derzforth_m1_src}}; \
       printf "\x04"; \
-      printf "\nfoo\nkey emit\nA\n"; \
+      printf "\nfoo\nkey emit\nA\nbye\n"; \
     ) | timeout "${TIMEOUT_FULL_CHAIN:-20.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{build_dir}}/hex0.bin > {{build_dir}}/full_chain_derzforth.out 2>/dev/null || status=$?; \
-    [[ "$status" -eq 0 || "$status" -eq 124 ]]; \
+    [[ "$status" -eq 0 ]]; \
     grep -Fqx " ok" {{build_dir}}/full_chain_derzforth.out; \
     grep -Fqx " ?" {{build_dir}}/full_chain_derzforth.out; \
     grep -Fqx "A ok" {{build_dir}}/full_chain_derzforth.out; \
@@ -70,8 +70,8 @@ test_derzforth: derzforth_elf
     mkdir -p {{build_dir}}; \
     rm -f {{build_dir}}/derzforth.out {{build_dir}}/derzforth.ok; \
     status=0; \
-    printf "\nfoo\nkey emit\nA\n" | timeout "${TIMEOUT_DERZFORTH:-5.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{derzforth_elf}} > {{build_dir}}/derzforth.out 2>/dev/null || status=$?; \
-    [[ "$status" -eq 0 || "$status" -eq 124 ]]; \
+    printf "\nfoo\nkey emit\nA\nbye\n" | timeout "${TIMEOUT_DERZFORTH:-5.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{derzforth_elf}} > {{build_dir}}/derzforth.out 2>/dev/null || status=$?; \
+    [[ "$status" -eq 0 ]]; \
     grep -Fqx " ok" {{build_dir}}/derzforth.out; \
     grep -Fqx " ?" {{build_dir}}/derzforth.out; \
     grep -Fqx "A ok" {{build_dir}}/derzforth.out; \

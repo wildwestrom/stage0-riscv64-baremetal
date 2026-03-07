@@ -631,7 +631,6 @@ body_key:
     j next
 
     .balign 4
-latest:  # mark the latest builtin word
 word_emit:
     .word word_key
     .word 0x3c964f74  # djb2_hash('emit')
@@ -641,6 +640,17 @@ body_emit:
     addi sp, sp, -4  # dec data stack ptr
     lw a0, 0(sp)      # pop char into a1
     call serial_putc   # emit the char via serial_putc
+    j next
+
+    .balign 4
+latest:  # mark the latest builtin word
+word_bye:
+    .word word_emit
+    .word 0x0b8863c5  # djb2_hash('bye')
+code_bye:
+    .word body_bye
+body_bye:
+    call qemu_poweroff
     j next
 
     .balign 4

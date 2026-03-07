@@ -5,6 +5,8 @@
     # image directly at its runtime RAM base and skip the self-copy stage.
     .equ ROM_BASE_ADDR, RAM_BASE_ADDR
     .equ ROM_SIZE, RAM_SIZE
+    .equ QEMU_TEST_BASE_ADDR, 0x00100000
+    .equ QEMU_TEST_POWER_OFF, 0x5555
 
 
 serial_init:
@@ -31,3 +33,11 @@ serial_putc:
     li t0, 0x10000000
     sb a0, 0(t0)
     ret
+
+
+qemu_poweroff:
+    li t0, QEMU_TEST_BASE_ADDR
+    li t1, QEMU_TEST_POWER_OFF
+    sw t1, 0(t0)
+1:
+    j 1b
