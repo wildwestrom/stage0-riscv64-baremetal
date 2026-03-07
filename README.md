@@ -22,20 +22,38 @@ Every existing bootstrapping path goes through C, a language with [undefined beh
 
 Why spend eternity hunting bugs when you can make them impossible to represent? This is the core design principle of the project. The techniques below represent the design space we're drawing from — not a checklist to implement all at once, but a toolkit of ideas that inform every decision about what this system's semantics should look like:
 
-- Pure functional programming
+**Type Systems**
+- Algebraic data types
 - Linear types
 - Dependent types
-- Algebraic data types
-- Errors as values
-- Capability-based security
-- Calculating compilers
-- Formal verification
-- Proofs as programs (Curry-Howard correspondence)
-- Non-turing complete languages / Total programming languages
+- Refinement types
+- Session types
+
+**Ownership & Memory Safety**
 - Borrow checking
-- Recursion schemes (ana-,cata-,hylo-morphisms)
+- Region-based memory management
+- Pointer capabilities (CHERI)
+
+**Programming Model**
+- Pure functional programming
+- Errors as values
+- Total programming / Non-turing complete languages
+- Recursion schemes (ana-, cata-, hylo-morphisms)
+- Effect systems / Algebraic effects
+- Immutability by default
+
+**Concurrency**
 - Communicating sequential processes
 - The actor model
+
+**Verification & Proof**
+- Formal verification
+- Proofs as programs (Curry-Howard correspondence)
+- Calculating compilers
+- Property-based testing
+
+**Security**
+- Capability-based security
 
 Some of these ideas feel natural and pleasant to use. Some are so academic they're hard to wrap your head around, let alone implement. But it doesn't have to stay that way. The *monad* was an ivory tower category theory concept until languages like Rust and Swift called them `Result` and `Option`.
 
