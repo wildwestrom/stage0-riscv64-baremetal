@@ -24,32 +24,22 @@ My urge is to simplify the chain, by starting an entirely new chain. This requir
 
 I believe we're paying far more for buggy, unreliable, and expensive software than if we comitted fully to **correctness by construction**. If that's not a worthwhile undertaking, I don't know what is. 
 
-## Possible Roadmap
+## Roadmap
 
-I've done some research on minimal languages for bootstrapping. Something with a specification that's 10 instead of 600 pages is probably a good idea. Maybe even something formally verified like CakeML (which I know relies of HOL, which relies on SML, which relies on C or C++). I don't think it would be feasible to write a Standard ML-like language in assembly. It would need a prior high-level language to express the type system sufficiently.
+The question used to be "what should Tier 1 be after `M0`?" Right now the answer is: Forth, or at least Forth enough to keep climbing. I copied in [DerzForth](https://github.com/theandrew168/derzforth/), a Forth implementation, and got it into the bootstrap chain, which is already more concrete progress than continuing to bikeshed candidate languages forever.
 
-Obviously we need some intermediate language(s).
+That does **not** mean the language problem is solved. At the moment I have smoke tests, not deep confidence. I do not yet understand Forth well enough to treat it as a comfortable long-term programming environment, but it looks like a plausible bridge between macro assembly and something nicer.
 
-First something a little nicer than assembly (post `M0`) which I'll call Tier 1:
+So the near-term roadmap is:
 
-- LISP: Garbage collector, way more familiar to me (Clojure was my first language before Rust), probably not easy to access registers or memory
-- Forth: Supposedly trivial to implement in assembly, powerful, close to the hardware, but from what I saw, it's less readable than assembly. Not to mention the stack juggling I'll have to do in my head.
-- [Oberon](https://projectoberon.net/): small spec, similar to C semantically, used to implement a whole OS, but possibly too early in the toolchain
-- Something I don't know about.
-- Something completely new: I'm nowhere near an expert that can design and implement a language in assembly.
+- Treat Forth as the current Tier 1 substrate and get comfortable extending it intentionally rather than cargo-culting changes.
+- Improve confidence beyond "it boots and a few words work" with better tests and more documentation of what the current image can actually do.
+- Use that Forth layer to grow the next stage of the bootstrap chain: either a more structured metaprogramming environment, a better assembler/tool generator, or the runtime support needed for a nicer Tier 2 language.
+- Defer final Tier 2 language selection until the Forth layer is understood well enough to judge what it makes easy or painful.
 
-I could easily just steal or port an existing Tier 1, but I'd still have to then use that for the next step.
+Tier 2 is still the real prize. I want something higher level, simpler to reason about, and less cursed than inheriting C semantics by accident. Maybe that ends up looking a bit like [Oberon](https://projectoberon.net/), maybe something ML-ish, maybe something else entirely. I do not know yet, and that's fine. Forth currently buys me a place to stand while I figure that out.
 
-Then something nicer than that but still simple and powerful. All of these currently rely on C as part of their bootstrap process. Tier 2.
-
-- [Oberon](https://projectoberon.net/): for the reasons above, probably a good choice
-- LISP: same problems as other lisps
-- Standard ML: great type system, probably very hard to implement
-- Something else I don't know about.
-- Something completely new: I don't really want to design my own language at this stage.
-- C???: No...
-
-For all I know, I'll need many more steps in between, but hopefully nowhere close to the roughly 80 steps it takes to get to GCC in [`live-bootstrap`](https://github.com/fosslinux/live-bootstrap/blob/master/parts.rst).
+For all I know, I'll need more intermediate steps in between, but hopefully nowhere close to the roughly 80 steps it takes to get to GCC in [`live-bootstrap`](https://github.com/fosslinux/live-bootstrap/blob/master/parts.rst).
 
 Why wouldn't I accept an intermediate C (`cc_x86`, `M2 Planet`, `mescc`, `tinycc`)? Because, it begs the question: Why undertake this project at all? Why not just compress some of the existing bootstrap process with more C? Again, this is because you would then leak C's ill-defined semantics everywhere up the chain. We're trying to build new foundations.
 
@@ -62,7 +52,7 @@ The bootstrap chain has been tested on QEMU with CHERI support:
 - **hex2**: hex1 + multi-character labels (`:label_name`), relative pointers (`%label`, `&label`), word literals (`.XXXXXXXX`), alignment padding (`<`)
 - **M0**: Platform specific macro assembler - adds `DEFINE name hex`, expands macros, resolves hex2-style labels/immediates, assembles in memory, and executes directly
 
-Working chain:
+Current working chain:
 - Generate the initial `hex0.bin` seed from the handwritten `hex0.hex0`.
 - Load `hex0.bin` into QEMU.
 - Feed `hex0.hex0` over UART.
@@ -79,9 +69,9 @@ Working chain:
 - Send `key emit`, then `A`, confirm `A ok`.
 - Send `bye` to power off QEMU immediately when the test is done.
 
-`just test` verifies this full bootstrap chain.
+`just test` verifies this full bootstrap chain. Right now that is still a smoke test, not a proof that the Forth is mature or that I know how to use it well yet.
 
-We keep several reference artifact for comparison/debugging that are not part of the real bootstrap chain.
+We keep several reference artifacts for comparison/debugging that are not part of the real bootstrap chain.
 
 ## Debugging
 
