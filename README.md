@@ -28,22 +28,15 @@ I believe we're paying far more for buggy, unreliable, and expensive software th
 
 ## Roadmap
 
-The question used to be "what should Tier 1 be after `M0`?" Right now the answer is: Forth, or at least Forth enough to keep climbing. I copied in [DerzForth](https://github.com/theandrew168/derzforth/), a Forth implementation, and got it into the bootstrap chain, which is already more concrete progress than continuing to bikeshed candidate languages forever.
+The question used to be "what comes after `M0`?" Right now the answer is Forth. I copied in [DerzForth](https://github.com/theandrew168/derzforth/), and got it into the bootstrap chain.
 
-That does **not** mean the language problem is solved. At the moment I have smoke tests, not deep confidence. I do not yet understand Forth well enough to treat it as a comfortable long-term programming environment, but it looks like a plausible bridge between macro assembly and something nicer.
+At the moment I have smoke tests, not deep confidence. I do not yet understand Forth well enough to treat it as a comfortable long-term programming environment, but it looks like a plausible bridge between macro assembly and something nicer.
 
-So the near-term roadmap is:
+I also originally thought the next question would be what language to use. Turs out the right question is "what semantics are absolutely essential for correct and trusted computing?" I really don't know at this point. There's just a whole grab-bag of concepts in my head that I can draw from and experiment with, but that's not good enough for me. I still think formal verification is the best answer to this question at the moment, but how to get there, what concurrency model to use, what ABI to converge on, are still unsolved problems. 
 
-- Treat Forth as the current Tier 1 substrate and get comfortable extending it intentionally rather than cargo-culting changes.
-- Improve confidence beyond "it boots and a few words work" with better tests and more documentation of what the current image can actually do.
-- Use that Forth layer to grow the next stage of the bootstrap chain: either a more structured metaprogramming environment, a better assembler/tool generator, or the runtime support needed for a nicer Tier 2 language.
-- Defer final Tier 2 language selection until the Forth layer is understood well enough to judge what it makes easy or painful.
+For all I know, I'll need many more intermediate steps to get to a formally verified compiler, but hopefully nowhere close to the roughly 80 steps it takes to get to GCC in [`live-bootstrap`](https://github.com/fosslinux/live-bootstrap/blob/master/parts.rst).
 
-Tier 2 is still the real prize. I want something higher level, simpler to reason about, and less cursed than inheriting C semantics by accident. Maybe that ends up looking a bit like [Oberon](https://projectoberon.net/), maybe something ML-ish, maybe something else entirely. I do not know yet, and that's fine. Forth currently buys me a place to stand while I figure that out.
-
-For all I know, I'll need more intermediate steps in between, but hopefully nowhere close to the roughly 80 steps it takes to get to GCC in [`live-bootstrap`](https://github.com/fosslinux/live-bootstrap/blob/master/parts.rst).
-
-Why wouldn't I accept an intermediate C (`cc_x86`, `M2 Planet`, `mescc`, `tinycc`)? Because, it begs the question: Why undertake this project at all? Why not just compress some of the existing bootstrap process with more C? Again, this is because you would then leak C's ill-defined semantics everywhere up the chain. We're trying to build new foundations.
+Why wouldn't I accept an intermediate C (`cc_x86`, `M2 Planet`, `mescc`, `tinycc`)? Because, it begs the question: Why undertake this project at all? Why not just compress some of the existing bootstrap process with more C? Again, this is because you would then leak C's ill-defined semantics everywhere up the chain. The question remaining is "what semantics do we want as the foundation?"
 
 ## Where we're at
 
