@@ -51,15 +51,15 @@ Current working chain:
 - Generate the initial `hex0.bin` seed from the handwritten `hex0.hex0`.
 - Load `hex0.bin` into QEMU.
 - Feed `hex0.hex0` over UART.
-- Send execute signal (`0x04`).
+- Send execute signal (`0x04`/Ctrl-D).
 - Feed `hex1.hex0`
-- Send execute signal (`0x04`).
+- Send execute signal (`0x04`/Ctrl-D).
 - Feed `hex2.hex1`
-- Send execute signal (`0x04`).
+- Send execute signal (`0x04`/Ctrl-D).
 - Feed `M0.hex2`
-- Send execute signal (`0x04`).
+- Send execute signal (`0x04`/Ctrl-D).
 - Feed `derzforth.M1`.
-- Send execute signal (`0x04`).
+- Send execute signal (`0x04`/Ctrl-D).
 - Send `foo`, confirm ` ?`.
 - Send `key emit`, then `A`, confirm `A ok`.
 - Send `bye` to power off QEMU immediately when the test is done.
