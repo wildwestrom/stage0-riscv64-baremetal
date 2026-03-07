@@ -32,7 +32,9 @@ The question used to be "what comes after `M0`?" Right now the answer is Forth. 
 
 At the moment I have smoke tests, not deep confidence. I do not yet understand Forth well enough to treat it as a comfortable long-term programming environment, but it looks like a plausible bridge between macro assembly and something nicer.
 
-I also originally thought the next question would be what language to use. Turs out the right question is "what semantics are absolutely essential for correct and trusted computing?" I really don't know at this point. There's just a whole grab-bag of concepts in my head that I can draw from and experiment with, but that's not good enough for me. I still think formal verification is the best answer to this question at the moment, but how to get there, what concurrency model to use, what ABI to converge on, are still unsolved problems. 
+I also originally thought the next question would be what language to use. Turs out the right question is "what semantics are absolutely essential for correct and trusted computing?" I really don't know at this point. There's just a whole grab-bag of concepts in my head (see [Correctness By Construction](#correctness-by-construction)) that I can draw from and experiment with, but that's not good enough for me.
+
+I still think formal verification is the best answer to this question at the moment, there are so many unanswered questions. Perhaps the very most important question is: "What are the best abstractions to use for bootstrapping the final goal and in what order should they be implemented?"
 
 For all I know, I'll need many more intermediate steps to get to a formally verified compiler, but hopefully nowhere close to the roughly 80 steps it takes to get to GCC in [`live-bootstrap`](https://github.com/fosslinux/live-bootstrap/blob/master/parts.rst).
 
