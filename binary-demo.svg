@@ -1,0 +1,12 @@
+<svg width="151" height="16" viewBox="0 0 151 16" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">
+  <path d="
+    M0 10h1v6H0z M1 15h4v1H1z M5 10h1v6H5z M6 15h4v1H6z M10 10h1v6h-1z
+    M20 10h1v6h-1z M21 15h4v1h-4z M25 10h1v6h-1z M26 15h4v1h-4z M30 0h1v16h-1z
+    M40 10h1v6h-1z M41 15h4v1h-4z M45 0h1v16h-1z M46 15h4v1h-4z M50 10h1v6h-1z
+    M60 10h1v6h-1z M61 15h4v1h-4z M65 0h1v16h-1z M66 15h4v1h-4z M70 0h1v16h-1z
+    M80 0h1v16h-1z M81 15h4v1h-4z M85 10h1v6h-1z M86 15h4v1h-4z M90 10h1v6h-1z
+    M100 0h1v16h-1z M101 15h4v1h-4z M105 10h1v6h-1z M106 15h4v1h-4z M110 0h1v16h-1z
+    M120 0h1v16h-1z M121 15h4v1h-4z M125 0h1v16h-1z M126 15h4v1h-4z M130 10h1v6h-1z
+    M140 0h1v16h-1z M141 15h4v1h-4z M145 0h1v16h-1z M146 15h4v1h-4z M150 0h1v16h-1z
+  " fill="currentColor" />
+</svg>

@@ -160,6 +160,31 @@ Text is also fragile. Editing code should be structured and incorrect syntax sho
 - [Blockly](https://developers.google.com/blockly)
 - ["Zoom Out": The missing feature of IDEs](https://medium.com/source-and-buggy/zoom-out-the-missing-feature-of-ides-f32d0f36f392)
 
+#### Binary First
+
+This is extreme levels of re-thinking, but nonetheless falls within the aspirational section of this document.
+
+Inspired by ["the best way to count"](https://youtu.be/rDDaEVcwIJM), I say we display all numbers in binary form. If you haven't seen the video, basically it argues that base-10 is not great, seximal (base-6) is not much better, and that binary is ideal for learning, counting, and doing calculations. In the video they also created a unique way of showing base-2. Below is an example of 0-7 in this binary representation.
+
+![new binary representation in](./binary-demo.svg)
+
+```xml
+<svg width="151" height="16" viewBox="0 0 151 16" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">
+  <path d="
+    M0 10h1v6H0z M1 15h4v1H1z M5 10h1v6H5z M6 15h4v1H6z M10 10h1v6h-1z
+    M20 10h1v6h-1z M21 15h4v1h-4z M25 10h1v6h-1z M26 15h4v1h-4z M30 0h1v16h-1z
+    M40 10h1v6h-1z M41 15h4v1h-4z M45 0h1v16h-1z M46 15h4v1h-4z M50 10h1v6h-1z
+    M60 10h1v6h-1z M61 15h4v1h-4z M65 0h1v16h-1z M66 15h4v1h-4z M70 0h1v16h-1z
+    M80 0h1v16h-1z M81 15h4v1h-4z M85 10h1v6h-1z M86 15h4v1h-4z M90 10h1v6h-1z
+    M100 0h1v16h-1z M101 15h4v1h-4z M105 10h1v6h-1z M106 15h4v1h-4z M110 0h1v16h-1z
+    M120 0h1v16h-1z M121 15h4v1h-4z M125 0h1v16h-1z M126 15h4v1h-4z M130 10h1v6h-1z
+    M140 0h1v16h-1z M141 15h4v1h-4z M145 0h1v16h-1z M146 15h4v1h-4z M150 0h1v16h-1z
+  " fill="currentColor" />
+</svg>
+```
+
+This means I want text displays, terminals (but not VT descended, maybe [Arcan-based](https://arcan-fe.com/2025/01/27/sunsetting-cursed-terminal-emulation/)), hex editors, etc. to use this new binary display. Of course we should allow the grouping to be changed depending on what's comfortable for the user to read.
+
 ## License
 
 This repository is mixed-license.
