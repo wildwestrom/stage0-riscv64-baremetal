@@ -21,6 +21,21 @@
       in
       {
         legacyPackages = pkgs;
+        checks.default = pkgs.stdenv.mkDerivation {
+          name = "stage0-riscv64-test";
+          src = ./.;
+          nativeBuildInputs = [
+            qemu-cheri
+            pkgs.just
+            pkgs.unixtools.xxd
+          ];
+          buildPhase = ''
+            just test
+          '';
+          installPhase = ''
+            touch $out
+          '';
+        };
         devShells.default = pkgs.mkShell.override { stdenv = pkgs.clangStdenv; } {
           packages = with pkgs; [
             pkgsCross.riscv64-embedded.buildPackages.gcc
@@ -28,6 +43,7 @@
             qemu-cheri
             clang-tools
             just
+            pkgs.unixtools.xxd
           ];
         };
       }
