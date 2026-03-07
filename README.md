@@ -98,15 +98,9 @@ In terminal 4 we'll send our text.
 echo 'test text' >> qemu-dbg.in
 ```
 
-## Aspirational Considerations
+## Essential Goals
 
-I do not intend to simply just build an alternative toolchain, I want a secure and provably correct foundation for future computing.
-
-To do this, I have considered some other areas for improvement, but a lot of these are impossible to do in assembly, so they'll have to be way higher up the toolchain.
-
-I currently have no idea what the ideal abstractions are at each stage.
-
-#### Correctness By Construction
+### Correctness By Construction
 
 "We know it works and we can prove it."
 
@@ -129,23 +123,29 @@ Isn't that a wonderful thought? Why spend eternity hunting bugs when you can mak
 
 Some ideas feel natural and pleasant to use. Some are so academic I can't wrap my head around them, let alone implement myself. It doesn't have to stay that way though. The *monad* was an ivory tower category theory concept until languages like Rust and Swift called them `Result` and `Option`.
 
-#### CHERI
+### CHERI
 
-[CHERI (Capability Hardware Enhanced RISC Instructions)](https://www.cl.cam.ac.uk/research/security/ctsrd/cheri/) is an instruction set extension designed to add capability-based security at the hardware level. Basically, you can run ill-defined C code, and it will crash when accessing memory that it shouldn't. Note that while this does solve spatial access problems, it does not solve temporal access problems (use-after-free, etc.).
+[CHERI (Capability Hardware Enhanced RISC Instructions)](https://www.cl.cam.ac.uk/research/security/ctsrd/cheri/) is an instruction set extension designed to add capability-based security at the hardware level. Basically, you can run ill-defined C code, and it will crash when accessing memory that it shouldn't.
 
 This repository is already making use of a version of QEMU with CHERI support.
 
-#### Concurrency/Parallelism
+### Concurrency/Parallelism
 
 In C and pretty much every other language, we primarily write code meant to execute from top to bottom, sequentially. Asynchronous, concurrent, and parallel programming is often slapped on as an afterthought (perhaps with BEAM languages as a notable exception).
 
 I really want to think hard about this so it doesn't bite me later on.
 
-#### ABI and Calling Convention
+### ABI and Calling Convention
 
 Since I don't care about backwards compatibility, I could in theory design an ABI better than RISC-V's psABI. I do not yet know enough to say whether or not psABI is already close to optimal and trying to re-design it is a fools errand.
 
-#### Text Sucks Ass
+## Aspirational Considerations
+
+Not only do I want a secure and provably correct foundation for future computing, I also want computers to be nice to use.
+
+To do this, I have considered some other areas for improvement, but they're out of scope for right now.
+
+### Text Sucks
 
 There are many projects that attempted to make visual programming viable, but I'd argue that they'll never reach widespread adoption until they become self-hosting. I would consider this the BARE MINIMUM to be considered a "real" programming language (not that non-self-hosting languages aren't real languages, but I'm appealing to the C peoples' sensibilities).
 
@@ -160,7 +160,7 @@ Text is also fragile. Editing code should be structured and incorrect syntax sho
 - [Blockly](https://developers.google.com/blockly)
 - ["Zoom Out": The missing feature of IDEs](https://medium.com/source-and-buggy/zoom-out-the-missing-feature-of-ides-f32d0f36f392)
 
-#### Binary First
+### Binary First
 
 This is extreme levels of re-thinking, but nonetheless falls within the aspirational section of this document.
 
