@@ -7,6 +7,8 @@ build_dir := "build"
 hex0_c := "baremetal/high_level_prototype/stage0_monitor.c"
 hex0_ld := "baremetal/high_level_prototype/stage0_monitor.ld"
 m0_hex2 := "baremetal/M0.hex2"
+derzforth_src := "baremetal/GAS/derzforth.s"
+derzforth_elf := "build/derzforth.elf"
 asflags := "-march=rv64i -mabi=lp64"
 asflags_m0 := "-march=rv64i -mabi=lp64 --defsym M0_HEAP_BASE=0x80100000 --defsym M0_INPUT_BASE=0x80200000 --defsym M0_STACK_TOP=0x80500000"
 cflags := "-Oz -march=rv64i -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -ffreestanding -fno-builtin -fno-stack-protector -fomit-frame-pointer -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -ffunction-sections -fdata-sections"
@@ -51,6 +53,26 @@ debug_hex0:
     rm -f qemu-dbg.in qemu-dbg.out; \
     mkfifo qemu-dbg.in qemu-dbg.out; \
     exec qemu-system-riscv64-purecap -nographic -monitor none -serial pipe:qemu-dbg -machine virt -bios none -kernel {{build_dir}}/hex0.debug.elf -gdb tcp::1234 \
+  '
+
+derzforth_elf:
+  mkdir -p {{build_dir}}
+  {{cc}} {{ldflags}} {{derzforth_src}} -o {{derzforth_elf}}
+
+run_derzforth: derzforth_elf
+  exec qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{derzforth_elf}}
+
+test_derzforth: derzforth_elf
+  bash -euxo pipefail -c '\
+    mkdir -p {{build_dir}}; \
+    rm -f {{build_dir}}/derzforth.out {{build_dir}}/derzforth.ok; \
+    status=0; \
+    printf "\nfoo\nkey emit\nA\n" | timeout "${TIMEOUT_DERZFORTH:-5.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{derzforth_elf}} > {{build_dir}}/derzforth.out 2>/dev/null || status=$?; \
+    [[ "$status" -eq 0 || "$status" -eq 124 ]]; \
+    grep -Fqx " ok" {{build_dir}}/derzforth.out; \
+    grep -Fqx " ?" {{build_dir}}/derzforth.out; \
+    grep -Fqx "A ok" {{build_dir}}/derzforth.out; \
+    touch {{build_dir}}/derzforth.ok \
   '
 
 clean:
