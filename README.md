@@ -1,5 +1,7 @@
 # Bootstrapping without C
 
+The master repository is on <https://github.com/wildwestrom/stage0-riscv64-baremetal>.
+
 Let's assume that C (like assembly) is fundamentally unsound. Why then are all our most critical systems and infrastructure built upon it then?
 
 That is where this project comes in. It's basically [`stage0`](https://github.com/oriansj/stage0) but for RISC-V on baremetal, and with no plans to get GCC up and running. This will be the toolchain that builds the foundation for all software of the future.
@@ -8,11 +10,11 @@ I made heavy use of LLMs in doing this and I'm not proud. Yes, I understand that
 
 ## Relevant Links
 
-- https://bootstrappable.org/
-- https://reproducible-builds.org/
-- https://github.com/oriansj/stage0
-- https://github.com/fosslinux/live-bootstrap
-- https://bootstrapping.miraheze.org/wiki/Main_Page
+- <https://bootstrappable.org/>
+- <https://reproducible-builds.org/>
+- <https://github.com/oriansj/stage0>
+- <https://github.com/fosslinux/live-bootstrap>
+- <https://bootstrapping.miraheze.org/wiki/Main_Page>
 
 ## The Problem
 
@@ -164,3 +166,20 @@ Text is also fragile. Editing code should be structured and incorrect syntax sho
 - [Scratch](https://scratch.mit.edu/)
 - [Blockly](https://developers.google.com/blockly)
 - ["Zoom Out": The missing feature of IDEs](https://medium.com/source-and-buggy/zoom-out-the-missing-feature-of-ides-f32d0f36f392)
+
+## License
+
+This repository is mixed-license.
+
+Unless a file says otherwise, original work in this repository is licensed under
+`GPL-3.0-or-later`. The full license text is available in
+[`LICENSE`](LICENSE) and [`LICENSES/GPL-3.0-or-later.txt`](LICENSES/GPL-3.0-or-later.txt).
+
+[`derzforth/`](derzforth) is upstream
+DerzForth by Andrew Dailey and remains MIT licensed. The full MIT text is
+available in
+[`derzforth/LICENSE`](derzforth/LICENSE) and [`LICENSES/MIT.txt`](LICENSES/MIT.txt).
+
+Files derived from DerzForth outside [`derzforth/`](derzforth)
+preserve the upstream MIT notice in their headers. If there is any conflict
+between this summary and a file header, follow the file header.

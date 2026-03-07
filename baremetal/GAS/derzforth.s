@@ -1,10 +1,14 @@
+## SPDX-FileCopyrightText: 2021 Andrew Dailey
+## SPDX-FileCopyrightText: 2026 Christian Westrom
+## SPDX-License-Identifier: MIT
+##
 .text
 .global _start
 _start:
 ## MIT License
 ##
-## Copyright (c) 2026 Christian Westrom
 ## Copyright (c) 2021 Andrew Dailey
+## Copyright (c) 2026 Christian Westrom
 ##
 ## Permission is hereby granted, free of charge, to any person obtaining a copy
 ## of this software and associated documentation files (the "Software"), to deal
@@ -27,7 +31,7 @@ _start:
 
 ## GNU assembler port of DerzForth for the QEMU `virt` machine used in this
 ## repository. This file is checked in intentionally; do not regenerate it at
-## build time.
+## build time. See LICENSES/MIT.txt for the canonical license text.
 
 # jump to "main" since programs execute top to bottom
 # we do this to enable writing helper funcs at the top

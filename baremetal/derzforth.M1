@@ -1,7 +1,13 @@
-## Copyright (C) 2026 Christian Westrom
+## SPDX-FileCopyrightText: 2021 Andrew Dailey
+## SPDX-FileCopyrightText: 2026 Christian Westrom
+## SPDX-License-Identifier: MIT
 ##
 ## Hand-written M1 port of baremetal/GAS/derzforth.s for the QEMU virt board.
-## Concatenate baremetal/riscv64_defs.M1 before assembling with M0.
+## This file is derived from DerzForth by Andrew Dailey. See LICENSES/MIT.txt
+## for the canonical license text.
+##
+## Copyright (c) 2021 Andrew Dailey
+## Copyright (c) 2026 Christian Westrom
 
 # Jump to main so helper routines can live at the top of the file.
 :_start
