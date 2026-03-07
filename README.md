@@ -4,8 +4,6 @@ What if every layer of your software — from the first instruction up — was p
 
 The master repository is on <https://github.com/wildwestrom/stage0-riscv64-baremetal>.
 
-I made heavy use of LLMs in doing this and I'm not proud. Yes, I understand that "root of trust"/"trusting trust" is the very problem `stage0` is trying to solve, but I really don't care enough to audit machine code seeds myself right now.
-
 ## Why
 
 **Software is unreliable.** Bugs cost money, time, and lives. We accept this as normal, but it's not inevitable.
@@ -214,6 +212,10 @@ echo 'test text' >> qemu-dbg.in
 - <https://github.com/oriansj/stage0>
 - <https://github.com/fosslinux/live-bootstrap>
 - <https://bootstrapping.miraheze.org/wiki/Main_Page>
+
+## Caveat
+
+I made heavy use of LLMs in doing this and I'm not proud. Yes, I understand that "root of trust"/"trusting trust" is the very problem `stage0` is trying to solve, but I really don't care enough to audit machine code seeds myself right now.
 
 ## License
 
