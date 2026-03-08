@@ -1,0 +1,169 @@
+# ABI design from scratch on CHERI RISC-V
+
+**A clean-slate ABI for a formally verifiable, capability-first bare-metal system can shed roughly 60% of the RISC-V psABI's complexity — struct flattening, va_args, GOT/PLT, ELF TLS, and the entire C type taxonomy — while gaining hardware-enforced spatial safety, control-flow integrity, and (with linear capability extensions) move semantics at the ISA level.** The critical early decision is not concurrency model but whether to commit to CHERI purecap with linear capabilities as the ABI's foundation, because that choice constrains stack design, register conventions, and inter-domain calling in ways that are difficult to retrofit. The research literature — StkTokens, CakeML, Cogent, seL4, and the Cambridge CHERI technical reports — converges on a clear set of principles: keep the ABI simple enough to verify, make capabilities the sole authority mechanism, and defer concurrency model choice by designing the calling convention around capability transfer rather than shared memory.
+
+---
+
+## The RISC-V psABI is a C compatibility layer, not a machine contract
+
+The RISC-V psABI (v1.1, editors Kito Cheng and Jessica Clarke) is best understood as an encoding of C's type system into register allocation rules. Its struct-passing convention recursively "flattens" aggregates to detect whether a struct contains one or two floating-point members, then routes those members into float registers (**fa0–fa7**) while routing integer members into integer registers (**a0–a7**). A struct with one `float` and one `int` gets split across register files; a union is never flattened. These rules exist solely because C permits heterogeneous value-type structs — a language with algebraic data types or uniform representations has no use for them.
+
+The C-ism runs deeper than calling conventions. The **va_args ABI** requires variadic arguments to always use the integer calling convention regardless of type, forcing callees to know which arguments are variadic. The **TLS model** uses ELF Variant I with the `tp` register pointing one past the end of the Thread Control Block, requiring four separate access models (Local Exec, Initial Exec, Global Dynamic, TLS Descriptors) and a family of relocation types. The **GOT/PLT** machinery assumes function pointers are bare addresses resolved by a dynamic linker. The `fcsr` floating-point control register is specified to have "thread storage duration per C11 §7.6" — a direct citation of the C standard in the ABI document.
+
+For a clean-slate system, roughly 60% of the psABI specification is eliminable: struct flattening, va_args, GOT/PLT, all ELF relocation types, the C/C++ type size tables, DWARF register mappings, linker relaxation rules, signal handler constraints on `tp`/`gp`, and C++ name mangling (Itanium ABI). What remains useful is the register naming convention (which derives from MIPS but is sensible), the **16-byte stack alignment** (needed for capability alignment in CHERI), and the general principle of passing the first several arguments in registers.
+
+**The concrete cost of inheriting the psABI** is not performance overhead but *structural mismatch*. A capability-based system needs function pointers to be sentry capabilities (not bare addresses), data pointers to carry bounds and permissions (not XLEN-bit integers), the stack pointer to enforce bounds (not a raw address), and return addresses to be sealed backward-edge sentries (not values in `ra`). Bolting these onto the psABI means fighting its assumptions at every level — the flattening rules assume pointer-sized values, the GOT assumes addresses, and `tp`/`gp` assume a flat address space. It is cheaper to start fresh.
+
+## CHERI purecap turns every pointer into a bounded, tagged authority
+
+CHERI capabilities on a 64-bit base architecture are **128 bits wide** plus a 1-bit out-of-band validity tag. The CHERI Concentrate encoding (Woodruff et al., IEEE TC 2019) packs base, bounds, permissions, and object type into those 128 bits using a floating-point-like compression scheme: **14-bit mantissas** for top and base bounds, with an optional 3-bit exponent consuming mantissa bits for larger objects. The smallest bound that cannot be precisely represented is approximately 4,097 bytes on CHERI-RISC-V. Permissions include Read, Write, Execute, capability Load/Store, Seal, Unseal, and Access System Registers. The tag bit, stored in separate tag memory at ~1% overhead, prevents forgery — any non-capability write to a capability's memory clears the tag.
+
+In CHERI-RISC-V's purecap ABI (designated **L64PC128D** for 64-bit with double-float), the existing 32 general-purpose registers are widened to 128 bits plus a tag bit. The register file is "merged" — there is no separate capability register file. Register aliases become capability-aware: **cra** (c1) holds a return-address capability, **csp** (c2) holds a stack-pointer capability with bounds, **cgp** (c3) is reserved for a capability global pointer, and **ca0–ca7** pass capability arguments. The **PCC** (Program Counter Capability) replaces the program counter and bounds instruction fetch; the **DDC** (Default Data Capability) is typically null in purecap mode since all memory accesses go through explicit capability operands.
+
+The purecap call stack differs from a standard RISC-V stack in three critical ways. First, **csp carries hardware-enforced bounds** — the kernel sets csp's bounds to the thread's stack allocation, and any access outside those bounds traps. Second, the return address in **cra is automatically sealed as a backward-edge sentry** by jump-and-link instructions, making it impossible to dereference cra as data or substitute a function pointer for a return address. Third, the CHERI compiler pass `CheriBoundAllocas` creates sub-capabilities with tight bounds for each stack-allocated variable via `csetbounds`, providing **spatial safety within the stack frame** — a buffer overflow on one local variable cannot corrupt adjacent variables or the return address.
+
+**Sentry capabilities** are the key innovation for control-flow integrity. A sentry is sealed with a reserved object type that the hardware automatically unseals on a jump instruction (`JALR`). Forward-edge sentries protect function entry points; backward-edge sentries protect return addresses. The two have different otype values, making cross-substitution impossible. This gives **hardware-enforced forward and backward CFI** without shadow stacks, control-flow graphs, or runtime checks.
+
+The purecap vs. hybrid tradeoff is stark. Hybrid CHERI allows mixing bare-address pointers (default) with capability-annotated pointers (`__capability`), which enables incremental adoption but provides **no guarantee of complete coverage** — any un-annotated pointer is unprotected. Purecap mode provides all-or-nothing memory safety at the cost of doubled pointer width (**128 bits vs. 64 bits**), increased cache pressure, and estimated **2–8% runtime overhead** on optimized hardware (from Morello early performance results). For a clean-slate system with no C compatibility requirement, purecap is unambiguously the right choice — the cost of hybrid is carrying an unprotected escape hatch.
+
+## Concurrency model choice reshapes the ABI from IPC primitives up
+
+The question of actor model vs. CSP/channels vs. shared memory with ownership is not just a language design decision — it determines what the ABI's fundamental communication primitive looks like.
+
+**Actor-model systems** require the ABI to support asynchronous message dispatch. Pony demonstrates the purest form: its six reference capabilities (`iso`, `val`, `ref`, `box`, `trn`, `tag`) are entirely compile-time constructs with **zero runtime representation** — at the machine level, all references are plain pointers. Message sends enqueue function-pointer-plus-captured-arguments onto lock-free MPSC queues. The ABI needs only efficient function dispatch (Pony uses LLVM's `fastcall`) and atomic queue operations. The type system guarantees that only `iso` (unique/isolated) or `val` (deeply immutable) references cross actor boundaries, enabling zero-copy messaging without runtime checks. The deep insight from Pony is that if the type system is strong enough, the ABI can be *simpler* — it doesn't need to carry ownership metadata because the compiler has already verified safety.
+
+**CSP/channel systems** push the ABI toward lightweight context switching. Go's internal ABI (ABIInternal) dedicates **R14 as the goroutine pointer register** for constant O(1) access to goroutine state, uses no callee-save registers, and requires stack growth checks in every function prologue. Go channels (`hchan`) are heap-allocated ring buffers with blocked-goroutine wait queues; the fast path copies data directly from sender to receiver stack, bypassing the buffer. The ABI must express goroutine identity and support cooperative yielding.
+
+**Capability microkernels** reveal the most ABI-relevant pattern for this project. seL4's ABI reduces to **capability invocation as the fundamental operation**: `seL4_Call` transfers message data in physical registers (up to `seL4_FastMessageRegisters`, typically 4) plus capabilities via `extraCaps`, with overflow to a per-thread IPC buffer. The critical design decision for seL4 was **simplification driven by formal verification** — IPC timeouts, scatter/gather, and variable-length in-kernel messages were all removed from earlier L4 designs because they complicated the Isabelle/HOL proof. Coyotos made the same move: its `InvokeCap` system call uses virtual registers mapped to CPU registers or memory, with entry capabilities carrying a 32-bit protected payload. Both demonstrate that **verification requirements compress the ABI**.
+
+Barrelfish offers a different lesson: its UMP (User-level Message Passing) protocol transfers messages in **single cache lines (64 bytes)** across cores using shared memory ring buffers with no kernel involvement, while LMP (Local Message Passing) uses register-based system calls for same-core communication. The Flounder IDL generates stubs for each transport, providing a uniform interface. This architecture suggests that a clean-slate ABI should define a **minimal capability-transfer primitive** and let higher-level protocols (actor mailboxes, channels, shared regions) be built on top.
+
+For this project, the key recommendation is to **design the ABI around capability transfer, not around a specific concurrency model**. The primitive operation should be: "invoke a sealed capability, passing N data words and M capabilities in registers, with a bounded continuation." Actor mailboxes, channels, and shared-memory regions can all be constructed from this primitive. seL4 and EROS/Coyotos both converged on this design independently.
+
+## Linear capabilities are the missing link between type safety and hardware enforcement
+
+The most significant finding across all the research is that **no mainstream ABI enforces linearity at the machine level**. Rust's move semantics, Clean's uniqueness types, ATS's linear types, and Linear Haskell all erase linearity at compile time — the generated machine code contains no enforcement mechanism. A "moved" value in Rust is just a memcpy; the compiler stops allowing access to the source, but the register or stack slot still contains the old value. Cogent (Data61) uses linear types to justify a refinement theorem connecting functional and imperative semantics, but the generated C code is ordinary C.
+
+**StkTokens** (Skorstengaard, Devriese, and Birkedal, POPL 2019) is the single most relevant work for this project. It defines a calling convention using **linear capabilities** — capabilities that hardware prevents from being duplicated — to enforce well-bracketed control flow and local state encapsulation on a capability machine. The mechanism: when a linear capability is copied (register-to-register or register-to-memory), the source is automatically invalidated (tag cleared). The caller provides the callee with (1) a stack capability restricted to the callee's frame, and (2) a linear return token that must be surrendered to return. Because the capabilities are linear, the callee cannot duplicate the return token or access the caller's frame. The proof, mechanized in Iris/Coq, demonstrates **compositional security against adversarial code**.
+
+The CHERI ISA (v8+) includes proposed extensions for linear capabilities: a linearity permission bit, automatic source invalidation on copy, and instructions `CSetLinear`, `CGetLinear`, `CSplit`, `CSplice`. Lippeveldts's thesis (VUB, 2019) provides a concrete QEMU implementation where `CLC` (capability load from memory) invalidates the source in memory, and `CSC` (capability store to memory) invalidates the source register. **Capstone**, a more recent capability architecture proposal, includes linear capabilities as a first-class feature with a revocation hierarchy for immediate capability invalidation.
+
+For this project, linear capabilities would provide:
+
+- **Hardware-enforced move semantics**: Passing a linear capability in a register automatically invalidates the source, no compiler trust required
+- **Single-use invocation tokens**: A sealed linear capability can be invoked exactly once, enabling one-shot continuations
+- **Stack safety without a shadow stack**: Per StkTokens, linear return tokens prevent stack frame escape without separate hardware
+- **Ownership tracking at the ABI boundary**: Cross-module calls can transfer ownership of resources via linear capabilities, with hardware enforcement
+
+The concrete calling convention would designate certain capability registers as "linear argument registers." A linear value in `ca0` passed to a callee would be automatically zeroed in the caller's `ca0` by hardware. The callee need not signal consumption — it holds the only valid copy by construction.
+
+## CPS calling conventions trade stack simplicity for explicit control flow
+
+CPS-transformed calling conventions eliminate the implicit call stack by representing all control flow as function application. The canonical implementation is **SML/NJ's JWA (Jump-With-Arguments) convention**: no runtime stack, all calls are tail calls to continuations, and continuation closures are heap-allocated. On x86-64, JWA maps CPS virtual registers directly to physical registers, with a single stack frame allocated by the runtime serving only as a GC nursery.
+
+**Chicken Scheme's "Cheney on the MTA"** uses the C stack as a nursery: functions never return, instead tail-calling their continuations. When the stack fills, a `longjmp` triggers a copying GC that moves live data to the heap. GHC's STG machine takes a hybrid approach: **dedicated registers** for runtime state (Base→R13, Sp→RBP, Hp→R12, R1→RBX on x86-64), a GHC-managed segmented stack separate from the C stack, and zero callee-saved registers since all registers pass STG state.
+
+For formal verification, CPS has a theoretical advantage: **all control flow is explicit** — there is no hidden stack state, making formal reasoning more direct. Appel's observation that CPS and SSA are isomorphic (1998), formalized by Kelsey (1995) and verified in Coq by Liu and Wang (2023), means CPS-based calling conventions can benefit from SSA-based analysis tools. However, **CakeML explicitly rejected CPS**, stating that direct-style compilation with a traditional stack is "easier to compile to our more performant C-style calls" and simpler to verify. CompCert similarly uses direct style.
+
+The practical costs of CPS are real: heap allocation pressure from continuation closures, poor cache locality compared to contiguous stacks, and GC requirements for short-lived frames. For a bare-metal CHERI system, the most promising hybrid is **defunctionalized CPS** — converting higher-order continuations into first-order tagged data types (Reynolds, 1972), eliminating closure allocation while maintaining explicit control flow — combined with CHERI's sealed capabilities as a hardware representation for continuations. A sealed capability pointing to code+data is structurally identical to a closure, and CHERI's sentry mechanism provides hardware-enforced invocation safety.
+
+## Stack architecture should start with split control/data plus CHERI bounds
+
+Verified systems converge on simple contiguous stacks. **seL4** uses a conventional C stack with restrictions (no upward pointer passing, no function pointers except exception vectors, no unbounded recursion). **CakeML** compiles through StackLang with a direct-style stack verified in HOL4. **CompCert** models the stack as an unbounded list of memory blocks, with Stack-Aware CompCert (Wang et al., POPL 2019) adding abstract stack tracking to enforce finiteness. The common pattern: **simpler stacks produce simpler proofs**.
+
+However, for a capability-first system, the split control/data stack pattern deserves serious consideration. Forth's dual-stack model (data stack + return stack), x86's shadow stack (CET), and GreenArrays GA144's hardware dual stacks all separate control flow from computation. On CHERI hardware, this becomes: **a return-address stack protected by a linear capability** (per StkTokens) and **a data stack protected by a bounded capability**. The return stack holds only sentry capabilities and is unreachable from the data stack. Buffer overflows on the data stack cannot corrupt return addresses — not because of a shadow-stack comparison check, but because no valid capability to the return stack exists in the data stack's reachable capability set.
+
+Segmented stacks should be avoided. Go abandoned them after Go 1.2 due to the **"hot split" problem** — functions near a segment boundary that repeatedly trigger allocation/deallocation in tight loops showed 4–5× slowdowns. Go moved to contiguous, copyable stacks, and Rust abandoned GCC's `-fsplit-stack` for the same reason. On a system with virtual memory, large contiguous virtual address reservations are cheap; on bare metal without virtual memory, CHERI stack bounds provide the safety that segmented stacks were trying to achieve.
+
+**Cactus stacks** are relevant if the concurrency model involves first-class continuations or coroutines. A cactus stack is a tree where multiple execution paths share ancestor frames. CHERI capabilities can protect each branch independently — each continuation gets a capability with bounds covering only its branch. StkTokens's linear capabilities prevent branches from interfering with each other. However, cactus stacks complicate GC (stack walking becomes tree walking) and reduce cache locality. For a system targeting formal verification, the added proof complexity may not be justified unless the language semantics require multi-shot continuations.
+
+## Register conventions should embrace CHERI's domain-crossing semantics
+
+The traditional caller/callee-save split is a compromise optimized for C-like call patterns. CHERI's compartmentalization model adds a critical new requirement: **register clearing at domain boundaries**. When crossing a trust boundary (calling into a different compartment), unused argument and return-value registers must be cleared to prevent capability leakage. This goes beyond caller/callee-save — it's a security invariant, not a performance optimization.
+
+The **Mill architecture's belt model** represents the most radical alternative: operands are referenced by position on a circular buffer (how recently they were produced), eliminating register allocation entirely. Each function call creates a clean boundary — the callee gets a fresh belt pre-seeded with arguments, with no access to the caller's belt. This maps naturally to SSA form and eliminates the caller/callee-save distinction. While the Mill is not available hardware, its design principle — **every call creates a clean, verifiable boundary** — aligns perfectly with CHERI compartmentalization.
+
+For CHERI-RISC-V specifically, the practical recommendation is:
+
+- **Argument registers (ca0–ca7)**: Cleared by callee before return if unused for return values, to prevent capability leakage
+- **Return registers (ca0–ca1)**: Cleared by caller after extracting return values
+- **Callee-saved capability registers (cs0–cs11)**: Must preserve capability tags across calls; a callee that stores a callee-saved capability register to memory and restores it must ensure the tag survives
+- **Temporary registers (ct0–ct6)**: Cleared at domain boundaries; within a single trust domain, treated as caller-save
+- **Linear argument registers**: If linear capabilities are supported, designate ca0–ca3 (or a subset) as linear-capable — hardware automatically zeroes the source on capability move
+
+CakeML's and CompCert's experience shows that **formally specifying the register convention as decidable boolean functions** (`is_callee_save r = true/false`) is essential for verification. Every register should be classifiable with a simple, deterministic rule.
+
+## Recommendations for the starting-point ABI design
+
+Given the goals — correctness by construction, formal verifiability, no C compatibility, CHERI hardware available, concurrency model TBD — the research converges on a clear set of decisions to make now and decisions to defer.
+
+**Decisions to make early (structural, hard to change later):**
+
+First, **commit to CHERI purecap with linear capability extensions**. This is the single most consequential decision. Purecap ensures every pointer is a bounded, tagged capability; linear capabilities (even if initially implemented in software/QEMU extensions per Lippeveldts) enable hardware-enforced move semantics and StkTokens-style stack safety. The alternative — hybrid CHERI or bare RISC-V with software-only safety — permanently limits what the ABI can express.
+
+Second, **design the calling convention around capability transfer as the primitive**. Following seL4 and Coyotos, the fundamental ABI operation should be "invoke a sealed capability, transferring N data words and M capabilities in registers." This makes the ABI concurrency-model-agnostic: actor messages, channel sends, and shared-memory region grants are all expressible as capability transfers. Use **4 capability argument registers** and **4 integer argument registers** as the fast path (matching seL4's `FastMessageRegisters` count, which is verification-optimal), with a capability to an IPC buffer for overflow.
+
+Third, **adopt a split control/data stack with CHERI bounds**. The return stack holds only sentry capabilities (return addresses) and is bounded by a separate capability from the data stack. This provides hardware CFI without shadow stacks, simplifies stack safety proofs (return addresses are structurally unreachable from data), and is compatible with both CPS-style (continuations replace return addresses) and direct-style calling.
+
+Fourth, **define an explicit register-clearing protocol at domain boundaries**. All non-argument, non-return capability registers must be cleared when crossing trust boundaries. This is not optional in a capability system — it is the mechanism that prevents ambient authority leakage. Specify it as a formal invariant from day one.
+
+**Decisions to defer (concurrency-dependent, refinable later):**
+
+The **concurrency model** can be deferred because the capability-transfer primitive supports all three models. Actor isolation can be built by restricting which capabilities each actor holds; channels can be built as shared ring buffers with paired endpoint capabilities; shared-memory regions can be granted as bounded capabilities with appropriate permissions.
+
+The **stack growth strategy** (contiguous with copying vs. fixed-size per thread/task) depends on the concurrency model's expected task count. For lightweight actors or goroutines, small fixed stacks with CHERI bounds checking (trap on overflow) may suffice; for heavier threads, contiguous stacks with capability-preserving copying are needed. Defer until task granularity is decided.
+
+Whether to use **CPS or direct-style compilation** should be deferred but explored. CakeML's experience suggests direct style is easier to verify; SML/NJ's experience suggests CPS has advantages for first-class continuations. The split-stack design accommodates both: in CPS mode, the return stack is unused (continuations are heap-allocated sealed capabilities); in direct mode, it functions normally.
+
+The **binary format** (replacement for ELF) can be deferred since bare-metal loading can initially use a trivial format. When designed, it should be a capability table rather than a GOT — each entry a full capability rather than a bare address.
+
+**The key insight from the literature is that formally verified systems succeed not by designing clever ABIs but by designing simple ones.** seL4's ABI is simpler than L4's. CompCert follows platform ABIs. CakeML uses a custom but straightforward direct-style convention. The StkTokens innovation is not complexity — it is using linear capabilities to *replace* complexity (shadow stacks, CFI instrumentation, stack canaries) with a single mechanism that admits clean proofs. The right ABI for this project is the simplest one that makes capability transfer the universal primitive and makes linearity expressible at the hardware level. Everything else is refinement.
+
+## Conclusion
+
+Three findings from this research are novel or underappreciated. First, the **StkTokens–CHERI connection** is more powerful than the existing literature emphasizes: linear capabilities on CHERI hardware can simultaneously enforce stack safety, provide hardware move semantics, and enable one-shot continuation tokens, collapsing three separate mechanisms into one. Second, **Pony's compile-time capability erasure** demonstrates that a sufficiently strong type system can make the ABI *simpler* rather than more complex — ownership metadata need not appear at the machine level if the compiler can verify it statically. This suggests the project's ABI should be designed to be simple enough that a verified compiler can target it directly, rather than encoding type information into the calling convention. Third, the **convergence of seL4, EROS, and Coyotos** on "capability invocation as the universal primitive" is not coincidental — it is the natural result of optimizing for both verification tractability and security. Any ABI designed for correctness by construction will likely arrive at the same place.
+
+The research systems that matter most for this project are: **StkTokens** for the calling convention formalization, **CakeML** for the verified compiler pipeline, **Cogent** for the linearity-to-verification bridge, **seL4** for the capability invocation ABI pattern, **CHERIoT** for the compartment-switching mechanism, and **Cerise/Iris** for the program logic framework. Starting with CHERI purecap, a StkTokens-inspired calling convention, and seL4-style capability invocation as the IPC primitive provides a foundation that is both formally tractable and practically implementable on QEMU today.
+
+> This document was generated using Claude's research feature.
+
+# References
+
+- <https://docs.riscv.org/reference/application-software/abi/_attachments/riscv-abi.pdf>
+- <https://en.wikipedia.org/wiki/Capability_Hardware_Enhanced_RISC_Instructions>
+- <https://arxiv.org/pdf/2407.08663>
+- <https://cnlelema.github.io/memo/en/cheri/cheri-domain/cheri-perm/>
+- <https://github.com/CTSRD-CHERI/cheri-elf-psabi/blob/master/riscv.md>
+- <https://www.cl.cam.ac.uk/techreports/UCAM-CL-TR-987.pdf>
+- <https://riscv.github.io/riscv-cheri/>
+- <https://cheriot.org/book/concepts.html>
+- <https://ctsrd-cheri.github.io/cheri-faq/>
+- <https://tutorial.ponylang.io/reference-capabilities/>
+- <https://www.ponylang.io/media/papers/opsla237-clebsch.pdf>
+- <https://www.ponylang.io/learn/reference-capabilities>
+- <https://lwn.net/Articles/1001224/>
+- <https://go.googlesource.com/go/+/refs/heads/dev.regabi/src/cmd/compile/internal-abi.md>
+- <https://medium.com/@sogol.hedayatmanesh/inside-go-channels-from-goroutine-basics-to-under-the-hood-mastery-d54c83d35dcc>
+- <https://flint.cs.yale.edu/cs428/doc/L3toseL4.pdf>
+- <https://hydra-www.ietfng.org/capbib/cache/shapiro:coyotosspec.html>
+- <https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html>
+- <https://arxiv.org/pdf/1811.02787v1>
+- <https://soft.vub.ac.be/~dodevrie/bachelor-thesis-aaron-lippeveldts.pdf>
+- <https://dl.acm.org/doi/pdf/10.1145/3352460.3358288>
+- <https://github.com/smlnj/smlnj-llvm-10>
+- <https://hn.nuxt.space/item/28397785>
+- <https://lists.llvm.org/pipermail/llvm-dev/2021-August/152037.html>
+- <https://groups.google.com/g/llvm-dev/c/BjOnK6E06Tw>
+- <https://cakeml.org/icfp17.pdf>
+- <https://cnlelema.github.io/memo/en/cheri/cheri-domain/cheri-seal/>
+- <https://cakeml.org/icfp16.pdf>
+- <https://hal.science/hal-02018168/document>
+- <https://dl.acm.org/doi/pdf/10.1145/3290375>
+- <https://blog.cloudflare.com/how-stacks-are-handled-in-go/>
+- <https://cseweb.ucsd.edu/~dstefan/cse227-spring20/papers/watson:cheri.pdf>
+- <https://encyclopedia.pub/entry/28699>
+- <https://compcert.org/doc/html/compcert.powerpc.Conventions1.html>
+- <https://compcert.org/doc/html/compcert.backend.Conventions.html>
+- <https://github.com/CTSRD-CHERI/cheri-elf-psabi/blob/master/riscv.md>
+- <https://riscv.org/blog/cheriot-a-study-in-cheri/>
+- <https://www.cl.cam.ac.uk/research/security/ctsrd/cheri/cheri-software.html>
