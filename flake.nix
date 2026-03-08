@@ -40,6 +40,7 @@
           packages = with pkgs; [
             pkgsCross.riscv64-embedded.buildPackages.gcc
             pkgsCross.riscv64-embedded.buildPackages.gdb
+            python3
             qemu-cheri
             clang-tools
             just

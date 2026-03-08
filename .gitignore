@@ -3,6 +3,8 @@
 .cursor
 
 build
+__pycache__/
+PLAN.md
 
 # For reference
 original_stage0

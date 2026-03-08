@@ -10,6 +10,7 @@ m0_hex2 := "baremetal/M0.hex2"
 derzforth_src := "baremetal/GAS/derzforth.s"
 derzforth_m1_src := "baremetal/derzforth.M1"
 derzforth_elf := "build/derzforth.elf"
+derzforth_debug_elf := "build/derzforth.debug.elf"
 asflags := "-march=rv64i -mabi=lp64"
 asflags_m0 := "-march=rv64i -mabi=lp64 --defsym M0_HEAP_BASE=0x80100000 --defsym M0_INPUT_BASE=0x80200000 --defsym M0_STACK_TOP=0x80500000"
 cflags := "-Oz -march=rv64i -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -ffreestanding -fno-builtin -fno-stack-protector -fomit-frame-pointer -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -ffunction-sections -fdata-sections"
@@ -63,6 +64,10 @@ debug_hex0:
 derzforth_elf:
   mkdir -p {{build_dir}}
   {{cc}} {{ldflags}} {{derzforth_src}} -o {{derzforth_elf}}
+
+derzforth_debug_elf:
+  mkdir -p {{build_dir}}
+  {{cc}} {{ldflags_debug}} {{derzforth_src}} -o {{derzforth_debug_elf}}
 
 run_derzforth: derzforth_elf
   exec qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{derzforth_elf}}
@@ -127,6 +132,20 @@ test_lisp: derzforth_elf
   '
 
 test_derzforth_m1: test_full_chain
+
+debug_lisp_start break="":
+  python3 scripts/debug_session.py start --mode lisp {{if break != "" { "--break-location " + quote(break) } else { "" }}}
+
+debug_cmd *args:
+  python3 scripts/debug_session.py {{args}}
+
+test_debug_harness_smoke:
+  bash -euxo pipefail -c '\
+    python3 scripts/debug_session.py start --mode lisp; \
+    python3 scripts/debug_session.py status; \
+    python3 scripts/debug_session.py regs; \
+    python3 scripts/debug_session.py stop; \
+  '
 
 clean:
   rm -rf {{build_dir}}

@@ -45,3 +45,29 @@ build/echo.o -o build/echo.elf \
 ```
 
 Note: objdump shows instruction words as big-endian hex (e.g., `00040137`). For hex0 format, reverse the bytes: `00040137` → `37 01 04 00`.
+
+## Debug Harness
+
+There is now an agent-oriented QEMU/GDB harness for DerzForth and the Lisp layer.
+
+Use the `just` recipes instead of reconstructing the workflow by hand:
+
+```sh
+just debug_lisp_start
+just debug_cmd status
+just debug_cmd regs
+just debug_cmd break interpreter_execute
+just debug_cmd serial-write --text '(quote (1 2))\n'
+just debug_cmd continue
+just debug_cmd serial-drain
+just debug_cmd stop
+```
+
+Important details:
+
+- The harness state lives under `build/debug/current/`.
+- `debug_lisp_start` builds `build/derzforth.debug.elf`, boots QEMU under GDB, loads `prelude.forth`, `control.forth`, and `lisp.forth`, then interrupts the target so it is Lisp-ready and stopped.
+- `just debug_cmd ...` returns one JSON object. Consume that JSON instead of scraping human-oriented terminal output.
+- Do not rely on `.gdbinit` for automation. The harness starts GDB explicitly with `--nx --nh --interpreter=mi2`.
+- If the session is stale or wedged, run `just debug_cmd stop` and start again.
+- The harness currently uses QEMU's GDB stub on localhost TCP internally. In restricted sandboxes that block local sockets, the start command can fail even though it works in a normal local shell.
