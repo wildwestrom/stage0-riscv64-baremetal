@@ -99,7 +99,7 @@ Current working chain:
 - Send `key emit`, then `A`, confirm `A ok`.
 - Send `bye` to power off QEMU immediately when the test is done.
 
-`just test` verifies this full bootstrap chain. Right now that is still a smoke test, not a proof that the Forth is mature or fully exercised.
+`just test` is the canonical bootstrap-chain check. It boots through the full chain, then loads the current Forth lexicons and runs the Lisp smoke tests through the real bootstrap route.
 
 We keep several reference artifacts for comparison/debugging that are not part of the real bootstrap chain.
 
@@ -123,7 +123,7 @@ A Nix flake is provided (`nix develop`) but is not required.
 just test
 ```
 
-This runs the full bootstrap chain on QEMU. See all available recipes with `just --list`.
+This runs the full bootstrap chain on QEMU, then loads the current control and Lisp lexicons and runs the Lisp smoke tests.
 
 If you have access to Nix, you can also run `nix flake test`, which does the same thing.
 

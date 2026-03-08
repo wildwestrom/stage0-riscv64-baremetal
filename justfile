@@ -22,9 +22,9 @@ hex0_bin:
   mkdir -p {{build_dir}}
   ./scripts/hex0_to_bin.sh baremetal/hex0.hex0 {{build_dir}}/hex0.bin
 
-test: test_full_chain
+test: test_full_chain_lisp
 
-test_full_chain: hex0_bin
+smoke_bootstrap_base: hex0_bin
   bash -euxo pipefail -c '\
     mkdir -p {{build_dir}}; \
     rm -f {{build_dir}}/full_chain_derzforth.out {{build_dir}}/full_chain_derzforth.actual; \
@@ -44,9 +44,43 @@ test_full_chain: hex0_bin
     ) | timeout "${TIMEOUT_FULL_CHAIN:-20.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{build_dir}}/hex0.bin > {{build_dir}}/full_chain_derzforth.out 2>/dev/null || status=$?; \
     sed -n "/^foo$/,\$p" {{build_dir}}/full_chain_derzforth.out > {{build_dir}}/full_chain_derzforth.actual; \
     if [[ "$status" -eq 0 ]] && cmp -s {{build_dir}}/full_chain_derzforth.actual tests/derzforth.expected; then \
-      printf "PASS test_full_chain\n"; \
+      printf "PASS smoke_bootstrap_base\n"; \
     else \
-      printf "FAIL test_full_chain: see %s and %s\n" "{{build_dir}}/full_chain_derzforth.out" "{{build_dir}}/full_chain_derzforth.actual" >&2; \
+      printf "FAIL smoke_bootstrap_base: see %s and %s\n" "{{build_dir}}/full_chain_derzforth.out" "{{build_dir}}/full_chain_derzforth.actual" >&2; \
+      exit 1; \
+    fi \
+  '
+
+test_full_chain_lisp: hex0_bin
+  bash -euxo pipefail -c '\
+    mkdir -p {{build_dir}}; \
+    rm -f {{build_dir}}/full_chain_lisp.out {{build_dir}}/full_chain_lisp.actual; \
+    status=0; \
+    ( \
+      cat baremetal/hex0.hex0; \
+      printf "\x04"; \
+      cat baremetal/hex1.hex0; \
+      printf "\x04"; \
+      cat baremetal/hex2.hex1; \
+      printf "\x04"; \
+      cat {{m0_hex2}}; \
+      printf "\x04"; \
+      cat baremetal/riscv64_defs.M1 {{derzforth_m1_src}}; \
+      printf "\x04"; \
+      printf "\n"; \
+      cat derzforth/lexicons/prelude.forth; \
+      printf "\n"; \
+      cat lexicons/control.forth; \
+      printf "\n"; \
+      cat lexicons/lisp.forth; \
+      printf "\n"; \
+      cat lexicons/tests/lisp_test.forth; \
+    ) | timeout "${TIMEOUT_FULL_CHAIN_LISP:-30.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{build_dir}}/hex0.bin > {{build_dir}}/full_chain_lisp.out 2>/dev/null || status=$?; \
+    sed -n "/^test-fixnum$/,\$p" {{build_dir}}/full_chain_lisp.out > {{build_dir}}/full_chain_lisp.actual; \
+    if [[ "$status" -eq 0 ]] && cmp -s {{build_dir}}/full_chain_lisp.actual tests/lisp.expected; then \
+      printf "PASS test_full_chain_lisp\n"; \
+    else \
+      printf "FAIL test_full_chain_lisp: see %s and %s\n" "{{build_dir}}/full_chain_lisp.out" "{{build_dir}}/full_chain_lisp.actual" >&2; \
       exit 1; \
     fi \
   '
@@ -131,7 +165,7 @@ test_lisp: derzforth_elf
     fi \
   '
 
-test_derzforth_m1: test_full_chain
+test_derzforth_m1: smoke_bootstrap_base
 
 debug_lisp_start break="":
   python3 scripts/debug_session.py start --mode lisp {{if break != "" { "--break-location " + quote(break) } else { "" }}}
