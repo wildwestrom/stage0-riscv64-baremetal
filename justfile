@@ -93,7 +93,7 @@ test_control: derzforth_elf
     printf "\n" >> {{build_dir}}/control.stdin; \
     cat lexicons/tests/control_test.forth >> {{build_dir}}/control.stdin; \
     status=0; \
-    cat {{build_dir}}/control.stdin | timeout "${TIMEOUT_CONTROL:-8.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{derzforth_elf}} > {{build_dir}}/control.out 2>/dev/null || status=$?; \
+    timeout "${TIMEOUT_CONTROL:-8.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{derzforth_elf}} < {{build_dir}}/control.stdin > {{build_dir}}/control.out 2>/dev/null || status=$?; \
     sed -n "/^test-if$/,\$p" {{build_dir}}/control.out > {{build_dir}}/control.actual; \
     if [[ "$status" -eq 0 ]] && cmp -s {{build_dir}}/control.actual tests/control.expected; then \
       printf "PASS test_control\n"; \
@@ -116,7 +116,7 @@ test_lisp: derzforth_elf
     printf "\n" >> {{build_dir}}/lisp.stdin; \
     cat lexicons/tests/lisp_test.forth >> {{build_dir}}/lisp.stdin; \
     status=0; \
-    cat {{build_dir}}/lisp.stdin | timeout "${TIMEOUT_LISP:-10.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{derzforth_elf}} > {{build_dir}}/lisp.out 2>/dev/null || status=$?; \
+    timeout "${TIMEOUT_LISP:-10.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{derzforth_elf}} < {{build_dir}}/lisp.stdin > {{build_dir}}/lisp.out 2>/dev/null || status=$?; \
     sed -n "/^test-fixnum$/,\$p" {{build_dir}}/lisp.out > {{build_dir}}/lisp.actual; \
     if [[ "$status" -eq 0 ]] && cmp -s {{build_dir}}/lisp.actual tests/lisp.expected; then \
       printf "PASS test_lisp\n"; \
