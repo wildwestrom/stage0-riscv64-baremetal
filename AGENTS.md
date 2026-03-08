@@ -2,6 +2,10 @@
 
 This file provides guidance to LLMs when working with code in this repository. Any time you repeatedly make a mistake or waste time, put it here so you don't do it again.
 
+## Comments
+
+Comments are extremely important. Much of this is opaque machine code and assembly. Comments are critical for both humans and LLMs to understand just what the hell is going on. If at any time a comment misled you or doesn't match what's actually happening to the registers, memory, stack, etc. then rewrite it so it matches. Any lies within the comments serve only to mislead future readers and undermine auditablity.
+
 ## Automated Testing
 
 Tests are automated with `just`. QEMU is used for testing since there's no physical RISC-V machine available.
