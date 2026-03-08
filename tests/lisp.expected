@@ -60,4 +60,140 @@ test-alloc
 E ok
 
  ok
+: test-print-pair
+ ok
+  lisp-init
+ ok
+  1 make-fixnum 2 make-fixnum cons lisp-print 10 emit ;
+ ok
+test-print-pair
+(1 . 2)
+ ok
+
+ ok
+: make-symbol-x
+ ok
+  4 alloc >r
+ ok
+  ch-x r@ c!
+ ok
+  0 r@ 1 + c!
+ ok
+  hash-init ch-x hash-char r> make-symbol ;
+ ok
+
+ ok
+: expr-cons-12
+ ok
+  make-symbol-cons
+ ok
+  1 make-fixnum
+ ok
+  2 make-fixnum
+ ok
+  list3 ;
+ ok
+
+ ok
+: test-eval-quote
+ ok
+  lisp-init
+ ok
+  make-symbol-quote
+ ok
+  1 make-fixnum 2 make-fixnum list2
+ ok
+  list2
+ ok
+  0 eval lisp-print 10 emit ;
+ ok
+test-eval-quote
+(1 2)
+ ok
+
+ ok
+: test-eval-cons
+ ok
+  lisp-init
+ ok
+  expr-cons-12
+ ok
+  0 eval lisp-print 10 emit ;
+ ok
+test-eval-cons
+(1 . 2)
+ ok
+
+ ok
+: test-eval-first
+ ok
+  lisp-init
+ ok
+  make-symbol-first expr-cons-12 list2
+ ok
+  0 eval lisp-print 10 emit ;
+ ok
+test-eval-first
+1
+ ok
+
+ ok
+: test-eval-nil?
+ ok
+  lisp-init
+ ok
+  make-symbol-nil? make-symbol-nil list2
+ ok
+  0 eval lisp-print 10 emit ;
+ ok
+test-eval-nil?
+t
+ ok
+
+ ok
+: test-eval-define
+ ok
+  lisp-init
+ ok
+  make-symbol-define
+ ok
+  make-symbol-x
+ ok
+  0x20 8 + 2 + make-fixnum
+ ok
+  list3
+ ok
+  0 eval lisp-print 10 emit
+ ok
+  make-symbol-x 0 eval lisp-print 10 emit ;
+ ok
+test-eval-define
+24
+24
+ ok
+
+ ok
+: test-eval-lambda
+ ok
+  lisp-init
+ ok
+  make-symbol-lambda
+ ok
+  make-symbol-x list1
+ ok
+  make-symbol-x
+ ok
+  list3
+ ok
+  5 make-fixnum
+ ok
+  list2
+ ok
+  0 eval lisp-print 10 emit ;
+ ok
+test-eval-lambda
+5
+ ok
+
+ ok
 bye
