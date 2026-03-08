@@ -171,7 +171,7 @@ strtok_not_found:
 # Ret: a0 = addr of found word (0 if not found)
 lookup:
     beqz a0, lookup_not_found  # not found if next word addr is 0 (end of dict)
-    lw t0, 4(a0)               # t0 = hash of word name
+    lwu t0, 4(a0)              # zero-extend hash/flags so masked compares work on RV64
 
     # skip if the word is hidden
     li t1, F_HIDDEN            # load hidden flag into t1
@@ -647,7 +647,6 @@ body_emit:
     j next
 
     .balign 4
-latest:  # mark the latest builtin word
 word_bye:
     .word word_emit
     .word 0x0b8863c5  # djb2_hash('bye')
@@ -655,6 +654,146 @@ code_bye:
     .word body_bye
 body_bye:
     call qemu_poweroff
+    j next
+
+    .balign 4
+word_comma:
+    .word word_bye
+    .word 0x0002b5d1  # djb2_hash(',')
+code_comma:
+    .word body_comma
+body_comma:
+    addi sp, sp, -4  # pop x from the data stack
+    lw t0, 0(sp)
+    sw t0, 0(s6)     # write x to HERE
+    addi s6, s6, 4   # HERE += 4
+    j next
+
+    .balign 4
+word_lbracket:
+    .word word_comma
+    .word 0x0002b600 | F_IMMEDIATE  # djb2_hash('[') or'd w/ F_IMMEDIATE flag
+code_lbracket:
+    .word body_lbracket
+body_lbracket:
+    li s1, 0  # STATE = execute
+    j next
+
+    .balign 4
+word_rbracket:
+    .word word_lbracket
+    .word 0x0002b602  # djb2_hash(']')
+code_rbracket:
+    .word body_rbracket
+body_rbracket:
+    li s1, 1  # STATE = compile
+    j next
+
+    .balign 4
+word_immediate:
+    .word word_rbracket
+    .word 0x0aa03fb4  # djb2_hash('immediate')
+code_immediate:
+    .word body_immediate
+body_immediate:
+    lw t0, 4(s7)        # load LATEST's hash/flags field
+    li t1, F_IMMEDIATE
+    or t0, t0, t1       # set the immediate flag in-place
+    sw t0, 4(s7)
+    j next
+
+    .balign 4
+word_tick:
+    .word word_immediate
+    .word 0x0002b5cc  # djb2_hash('''')
+code_tick:
+    .word body_tick
+body_tick:
+    # Parse the next token from the current input buffer and push its CFA.
+    add a0, s3, s5
+    sub a1, s4, s5
+    call strtok
+    beqz a0, error
+    add s5, s5, a2
+
+    call djb2_hash
+
+    mv a1, a0
+    mv a0, s7
+    call lookup
+    beqz a0, error
+
+    addi t0, a0, 8  # CFA = dictionary entry + link/hash
+    sw t0, 0(sp)
+    addi sp, sp, 4
+    j next
+
+    .balign 4
+word_cat:
+    .word word_tick
+    .word 0x00597748  # djb2_hash('c@')
+code_cat:
+    .word body_cat
+body_cat:
+    addi sp, sp, -4  # pop addr from the data stack
+    lwu t0, 0(sp)
+    lbu t0, 0(t0)    # zero-extend the loaded byte
+    sw t0, 0(sp)
+    addi sp, sp, 4
+    j next
+
+    .balign 4
+word_cex:
+    .word word_cat
+    .word 0x00597729  # djb2_hash('c!')
+code_cex:
+    .word body_cex
+body_cex:
+    addi sp, sp, -8  # pop byte and addr from the data stack
+    lwu t0, 4(sp)
+    lw t1, 0(sp)
+    sb t1, 0(t0)
+    j next
+
+    .balign 4
+word_tor:
+    .word word_cex
+    .word 0x005972b5  # djb2_hash('>r')
+code_tor:
+    .word body_tor
+body_tor:
+    addi sp, sp, -4  # pop x from the data stack
+    lw t0, 0(sp)
+    sw t0, 0(tp)     # push x onto the return stack
+    addi tp, tp, 4
+    j next
+
+    .balign 4
+word_rfrom:
+    .word word_tor
+    .word 0x00597935  # djb2_hash('r>')
+code_rfrom:
+    .word body_rfrom
+body_rfrom:
+    addi tp, tp, -4  # pop x from the return stack
+    lwu t0, 0(tp)
+    sw t0, 0(sp)     # push x onto the data stack
+    addi sp, sp, 4
+    j next
+
+    .balign 4
+latest:  # mark the latest builtin word
+word_lit:
+    .word word_rfrom
+    .word 0x0b888c4e  # djb2_hash('lit')
+code_lit:
+    .word body_lit
+body_lit:
+    # Push the inline cell that immediately follows this word in threaded code.
+    lwu t0, 0(gp)
+    addi gp, gp, 4
+    sw t0, 0(sp)
+    addi sp, sp, 4
     j next
 
     .balign 4

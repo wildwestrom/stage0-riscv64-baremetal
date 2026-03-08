@@ -122,7 +122,7 @@
 # Ret: a0 = addr of found word (0 if not found)
 :lookup
     RS1_A0 @lookup_not_found BEQZ
-    RD_T0 RS1_A0 !4 LW
+    RD_T0 RS1_A0 !4 LWU
 
     RD_T1 ~0x40000000 LUI
     RD_T1 RS1_T0 RS2_T1 AND
@@ -585,7 +585,6 @@
     $next JAL
 
 <
-:latest
 :word_bye
     &word_emit
     %0x0B8863C5
@@ -593,6 +592,145 @@
     &body_bye
 :body_bye
     RD_RA $qemu_poweroff JAL
+    $next JAL
+
+<
+:word_comma
+    &word_bye
+    %0x0002B5D1
+:code_comma
+    &body_comma
+:body_comma
+    RD_SP RS1_SP !-4 ADDI
+    RD_T0 RS1_SP LW
+    RS1_S6 RS2_T0 SW
+    RD_S6 RS1_S6 !4 ADDI
+    $next JAL
+
+<
+:word_lbracket
+    &word_comma
+    %0x8002B600
+:code_lbracket
+    &body_lbracket
+:body_lbracket
+    RD_S1 ADDI
+    $next JAL
+
+<
+:word_rbracket
+    &word_lbracket
+    %0x0002B602
+:code_rbracket
+    &body_rbracket
+:body_rbracket
+    RD_S1 !1 ADDI
+    $next JAL
+
+<
+:word_immediate
+    &word_rbracket
+    %0x0AA03FB4
+:code_immediate
+    &body_immediate
+:body_immediate
+    RD_T0 RS1_S7 !4 LW
+    RD_T1 !1 ADDIW
+    RD_T1 RS1_T1 RS2_X31 SLLI
+    RD_T0 RS1_T0 RS2_T1 OR
+    RS1_S7 RS2_T0 @4 SW
+    $next JAL
+
+<
+:word_tick
+    &word_immediate
+    %0x0002B5CC
+:code_tick
+    &body_tick
+:body_tick
+    RD_A0 RS1_S3 RS2_S5 ADD
+    RD_A1 RS1_S4 RS2_S5 SUB
+    RD_RA $strtok JAL
+    RS1_A0 @error BEQZ
+    RD_S5 RS1_S5 RS2_A2 ADD
+
+    RD_RA $djb2_hash JAL
+
+    RD_A1 RS1_A0 MV
+    RD_A0 RS1_S7 MV
+    RD_RA $lookup JAL
+    RS1_A0 @error BEQZ
+
+    RD_T0 RS1_A0 !8 ADDI
+    RS1_SP RS2_T0 SW
+    RD_SP RS1_SP !4 ADDI
+    $next JAL
+
+<
+:word_cat
+    &word_tick
+    %0x00597748
+:code_cat
+    &body_cat
+:body_cat
+    RD_SP RS1_SP !-4 ADDI
+    RD_T0 RS1_SP LWU
+    RD_T0 RS1_T0 LBU
+    RS1_SP RS2_T0 SW
+    RD_SP RS1_SP !4 ADDI
+    $next JAL
+
+<
+:word_cex
+    &word_cat
+    %0x00597729
+:code_cex
+    &body_cex
+:body_cex
+    RD_SP RS1_SP !-8 ADDI
+    RD_T0 RS1_SP !4 LWU
+    RD_T1 RS1_SP LW
+    RS1_T0 RS2_T1 SB
+    $next JAL
+
+<
+:word_tor
+    &word_cex
+    %0x005972B5
+:code_tor
+    &body_tor
+:body_tor
+    RD_SP RS1_SP !-4 ADDI
+    RD_T0 RS1_SP LW
+    RS1_TP RS2_T0 SW
+    RD_TP RS1_TP !4 ADDI
+    $next JAL
+
+<
+:word_rfrom
+    &word_tor
+    %0x00597935
+:code_rfrom
+    &body_rfrom
+:body_rfrom
+    RD_TP RS1_TP !-4 ADDI
+    RD_T0 RS1_TP LWU
+    RS1_SP RS2_T0 SW
+    RD_SP RS1_SP !4 ADDI
+    $next JAL
+
+<
+:latest
+:word_lit
+    &word_rfrom
+    %0x0B888C4E
+:code_lit
+    &body_lit
+:body_lit
+    RD_T0 RS1_GP LWU
+    RD_GP RS1_GP !4 ADDI
+    RS1_SP RS2_T0 SW
+    RD_SP RS1_SP !4 ADDI
     $next JAL
 
 <
