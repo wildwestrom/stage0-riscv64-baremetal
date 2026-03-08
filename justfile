@@ -26,7 +26,7 @@ test: test_full_chain
 test_full_chain: hex0_bin
   bash -euxo pipefail -c '\
     mkdir -p {{build_dir}}; \
-    rm -f {{build_dir}}/full_chain_derzforth.out {{build_dir}}/full_chain_derzforth.ok; \
+    rm -f {{build_dir}}/full_chain_derzforth.out {{build_dir}}/full_chain_derzforth.actual; \
     status=0; \
     ( \
       cat baremetal/hex0.hex0; \
@@ -41,11 +41,13 @@ test_full_chain: hex0_bin
       printf "\x04"; \
       printf "\nfoo\nkey emit\nA\nbye\n"; \
     ) | timeout "${TIMEOUT_FULL_CHAIN:-20.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{build_dir}}/hex0.bin > {{build_dir}}/full_chain_derzforth.out 2>/dev/null || status=$?; \
-    [[ "$status" -eq 0 ]]; \
-    grep -Fqx " ok" {{build_dir}}/full_chain_derzforth.out; \
-    grep -Fqx " ?" {{build_dir}}/full_chain_derzforth.out; \
-    grep -Fqx "A ok" {{build_dir}}/full_chain_derzforth.out; \
-    touch {{build_dir}}/full_chain_derzforth.ok \
+    sed -n "/^foo$/,\$p" {{build_dir}}/full_chain_derzforth.out > {{build_dir}}/full_chain_derzforth.actual; \
+    if [[ "$status" -eq 0 ]] && cmp -s {{build_dir}}/full_chain_derzforth.actual tests/derzforth.expected; then \
+      printf "PASS test_full_chain\n"; \
+    else \
+      printf "FAIL test_full_chain: see %s and %s\n" "{{build_dir}}/full_chain_derzforth.out" "{{build_dir}}/full_chain_derzforth.actual" >&2; \
+      exit 1; \
+    fi \
   '
 
 debug_hex0:
@@ -68,14 +70,60 @@ run_derzforth: derzforth_elf
 test_derzforth: derzforth_elf
   bash -euxo pipefail -c '\
     mkdir -p {{build_dir}}; \
-    rm -f {{build_dir}}/derzforth.out {{build_dir}}/derzforth.ok; \
+    rm -f {{build_dir}}/derzforth.out {{build_dir}}/derzforth.actual; \
     status=0; \
     printf "\nfoo\nkey emit\nA\nbye\n" | timeout "${TIMEOUT_DERZFORTH:-5.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{derzforth_elf}} > {{build_dir}}/derzforth.out 2>/dev/null || status=$?; \
-    [[ "$status" -eq 0 ]]; \
-    grep -Fqx " ok" {{build_dir}}/derzforth.out; \
-    grep -Fqx " ?" {{build_dir}}/derzforth.out; \
-    grep -Fqx "A ok" {{build_dir}}/derzforth.out; \
-    touch {{build_dir}}/derzforth.ok \
+    sed -n "/^foo$/,\$p" {{build_dir}}/derzforth.out > {{build_dir}}/derzforth.actual; \
+    if [[ "$status" -eq 0 ]] && cmp -s {{build_dir}}/derzforth.actual tests/derzforth.expected; then \
+      printf "PASS test_derzforth\n"; \
+    else \
+      printf "FAIL test_derzforth: see %s and %s\n" "{{build_dir}}/derzforth.out" "{{build_dir}}/derzforth.actual" >&2; \
+      exit 1; \
+    fi \
+  '
+
+test_control: derzforth_elf
+  bash -euxo pipefail -c '\
+    mkdir -p {{build_dir}}; \
+    rm -f {{build_dir}}/control.stdin {{build_dir}}/control.out {{build_dir}}/control.actual; \
+    printf "\n" > {{build_dir}}/control.stdin; \
+    cat derzforth/lexicons/prelude.forth >> {{build_dir}}/control.stdin; \
+    printf "\n" >> {{build_dir}}/control.stdin; \
+    cat lexicons/control.forth >> {{build_dir}}/control.stdin; \
+    printf "\n" >> {{build_dir}}/control.stdin; \
+    cat lexicons/tests/control_test.forth >> {{build_dir}}/control.stdin; \
+    status=0; \
+    cat {{build_dir}}/control.stdin | timeout "${TIMEOUT_CONTROL:-8.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{derzforth_elf}} > {{build_dir}}/control.out 2>/dev/null || status=$?; \
+    sed -n "/^test-if$/,\$p" {{build_dir}}/control.out > {{build_dir}}/control.actual; \
+    if [[ "$status" -eq 0 ]] && cmp -s {{build_dir}}/control.actual tests/control.expected; then \
+      printf "PASS test_control\n"; \
+    else \
+      printf "FAIL test_control: see %s and %s\n" "{{build_dir}}/control.out" "{{build_dir}}/control.actual" >&2; \
+      exit 1; \
+    fi \
+  '
+
+test_lisp: derzforth_elf
+  bash -euxo pipefail -c '\
+    mkdir -p {{build_dir}}; \
+    rm -f {{build_dir}}/lisp.stdin {{build_dir}}/lisp.out {{build_dir}}/lisp.actual; \
+    printf "\n" > {{build_dir}}/lisp.stdin; \
+    cat derzforth/lexicons/prelude.forth >> {{build_dir}}/lisp.stdin; \
+    printf "\n" >> {{build_dir}}/lisp.stdin; \
+    cat lexicons/control.forth >> {{build_dir}}/lisp.stdin; \
+    printf "\n" >> {{build_dir}}/lisp.stdin; \
+    cat lexicons/lisp.forth >> {{build_dir}}/lisp.stdin; \
+    printf "\n" >> {{build_dir}}/lisp.stdin; \
+    cat lexicons/tests/lisp_test.forth >> {{build_dir}}/lisp.stdin; \
+    status=0; \
+    cat {{build_dir}}/lisp.stdin | timeout "${TIMEOUT_LISP:-10.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{derzforth_elf}} > {{build_dir}}/lisp.out 2>/dev/null || status=$?; \
+    sed -n "/^test-fixnum$/,\$p" {{build_dir}}/lisp.out > {{build_dir}}/lisp.actual; \
+    if [[ "$status" -eq 0 ]] && cmp -s {{build_dir}}/lisp.actual tests/lisp.expected; then \
+      printf "PASS test_lisp\n"; \
+    else \
+      printf "FAIL test_lisp: see %s and %s\n" "{{build_dir}}/lisp.out" "{{build_dir}}/lisp.actual" >&2; \
+      exit 1; \
+    fi \
   '
 
 test_derzforth_m1: test_full_chain

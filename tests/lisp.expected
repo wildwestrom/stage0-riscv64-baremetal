@@ -1,0 +1,63 @@
+test-fixnum
+A ok
+
+ ok
+: test-pair
+ ok
+  lisp-init
+ ok
+  1 make-fixnum 2 make-fixnum cons dup pair?
+ ok
+  if dup first fixnum>n 1 =
+ ok
+     if dup rest fixnum>n 2 = if 0x40 2 + emit then then
+ ok
+  then
+ ok
+  drop ;
+ ok
+test-pair
+B ok
+
+ ok
+: test-nil
+ ok
+  0 nil?
+ ok
+  if 0x40 3 + emit then ;
+ ok
+test-nil
+C ok
+
+ ok
+: test-setters
+ ok
+  lisp-init
+ ok
+  1 make-fixnum 2 make-fixnum cons
+ ok
+  dup 3 make-fixnum over set-first!
+ ok
+  dup first fixnum>n 3 =
+ ok
+  if 0x40 4 + emit then
+ ok
+  drop ;
+ ok
+test-setters
+D ok
+
+ ok
+: test-alloc
+ ok
+  lisp-init
+ ok
+  12 alloc 12 alloc swap - 12 =
+ ok
+  if 0x40 5 + emit then ;
+ ok
+test-alloc
+E ok
+
+ ok
+bye

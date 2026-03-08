@@ -1,0 +1,17 @@
+test-if
+A ok
+
+ ok
+: test-else 0 if 0x40 1 + emit else 0x40 2 + emit then ;
+ ok
+test-else
+B ok
+
+ ok
+: test-begin 3 begin 1 - dup 0= until drop 0x40 3 + emit ;
+ ok
+test-begin
+C ok
+
+ ok
+bye
