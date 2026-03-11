@@ -4,7 +4,7 @@ This file provides guidance to LLMs when working with code in this repository. A
 
 ## Comments
 
-Comments are extremely important. Much of this is opaque machine code and assembly. Comments are critical for both humans and LLMs to understand just what the hell is going on. If at any time a comment misled you or doesn't match what's actually happening to the registers, memory, stack, etc. then rewrite it so it matches. Any lies within the comments serve only to mislead future readers and undermine auditablity.
+Comments are extremely important. Much of this is opaque machine code and assembly. Comments are critical for both humans and LLMs to understand just what the hell is going on. If at any time a comment misled you or doesn't match what's actually happening to the registers, memory, stack, etc. then rewrite it so it matches. Any lies within the comments serve only to mislead future readers and undermine auditability.
 
 ## Automated Testing
 
@@ -44,7 +44,7 @@ build/echo.o -o build/echo.elf \
 && riscv64-none-elf-objdump -d build/echo.elf
 ```
 
-Note: objdump shows instruction words as big-endian hex (e.g., `00040137`). For hex0 format, reverse the bytes: `00040137` → `37 01 04 00`.
+Note: `objdump` shows instruction words as big-endian hex (e.g., `00040137`). For hex0 format, reverse the bytes: `00040137` → `37 01 04 00`.
 
 ## Debug Harness
 
