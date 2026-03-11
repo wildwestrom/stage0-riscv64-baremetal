@@ -71,3 +71,14 @@ Important details:
 - Do not rely on `.gdbinit` for automation. The harness starts GDB explicitly with `--nx --nh --interpreter=mi2`.
 - If the session is stale or wedged, run `just debug_cmd stop` and start again.
 - The harness currently uses QEMU's GDB stub on localhost TCP internally. In restricted sandboxes that block local sockets, the start command can fail even though it works in a normal local shell.
+
+## Plan Maintenance
+
+`PLAN.md` is the living roadmap for this project. Keep it current as you work:
+
+1. **Update as you go** — PLAN.md should reflect reality, not aspirations from three sessions ago.
+2. **Collapse completed phases** — when a phase/task is done, replace its detail with a one-line summary (e.g., `~~Phase 2: Token reader~~ — Done.`). Don't delete entirely; keep the record.
+3. **Annotate active work** — when starting a phase, add implementation notes and any deviations from the original plan.
+4. **Add new items** — when bugs or new requirements surface, add them under an appropriate section.
+5. **Keep "next up" accurate** — the next agent should be able to read PLAN.md and know exactly where to pick up.
+6. **Prune stale detail** — completed implementation notes waste context and can mislead. Collapse them.

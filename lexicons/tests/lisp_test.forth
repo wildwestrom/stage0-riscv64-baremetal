@@ -103,4 +103,29 @@ test-eval-define
   0 eval lisp-print 10 emit ;
 test-eval-lambda
 
+: test-read-number
+  lisp-init
+  lisp-read lisp-print 10 emit ;
+test-read-number
+42
+: test-read-symbol
+  lisp-init
+  lisp-read lisp-print 10 emit ;
+test-read-symbol
+hello
+: test-read-list
+  lisp-init
+  lisp-read lisp-print 10 emit ;
+test-read-list
+(1 2 3)
+: test-read-nested
+  lisp-init
+  lisp-read lisp-print 10 emit ;
+test-read-nested
+((1 2) 3)
+: test-repl-quote
+  lisp-init
+  lisp-read global-env @ eval lisp-print 10 emit ;
+test-repl-quote
+(quote (1 2))
 bye

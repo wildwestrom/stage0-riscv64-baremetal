@@ -69,7 +69,8 @@
 : global-env  heap-ptr 4 + ;
 : true-symbol heap-ptr 8 + ;
 : nil-symbol  heap-ptr 0x0c + ;
-: heap-start  heap-ptr 0x10 + ;
+: lookahead   heap-ptr 0x10 + ;
+: heap-start  heap-ptr 0x14 + ;
 
 : alloc ( size -- addr )
   heap-ptr @ dup rot + heap-ptr ! ;
@@ -293,7 +294,7 @@
 : divmod10 ( n -- q r )
   0 swap
   begin
-    dup 10 < if swap exit then
+    dup 10 < if exit then
     10 - swap 1+ swap
     0
   until ;
@@ -440,4 +441,121 @@
   heap-start heap-ptr !
   0 global-env !
   0 true-symbol !
-  0 nil-symbol ! ;
+  0 nil-symbol !
+  -1 lookahead ! ;
+
+\ ===== Reader =====
+\ Reads S-expressions character-by-character via `key`, building boxed cells.
+\ A single-character lookahead buffer handles the common case where a delimiter
+\ is read one character past the end of an atom.
+
+\ Additional character constants for the reader.
+: ch-tab     9 ;
+: ch-newline 10 ;
+: ch-cr      0x0c 1 + ;
+: ch-9       ch-0 9 + ;
+
+\ Whitespace test.
+: ws? ( char -- flag )
+  dup ch-space = if drop -1 exit then
+  dup ch-tab = if drop -1 exit then
+  dup ch-newline = if drop -1 exit then
+  ch-cr = ;
+
+\ Read one character, checking the lookahead buffer first.
+: read-char ( -- char )
+  lookahead @ dup -1 = if drop key exit then
+  -1 lookahead ! ;
+
+\ Push one character back into the lookahead buffer.
+: unread-char ( char -- )
+  lookahead ! ;
+
+\ Skip whitespace characters, return the first non-whitespace char.
+: skip-ws ( -- char )
+  read-char
+  dup ws? 0= if exit then
+  drop recurse ;
+
+\ Digit test: is char in '0'..'9'?
+: digit? ( char -- flag )
+  dup ch-0 < if drop 0 exit then
+  ch-9 1+ < ;
+
+\ Accumulate decimal digits into a number. Reads chars until non-digit.
+: acc-digits ( n -- n )
+  read-char dup digit?
+  if ch-0 - swap 10* + recurse exit then
+  unread-char ;
+
+\ Test whether a character is a symbol-terminating delimiter.
+: sym-delim? ( char -- flag )
+  dup ws? if drop -1 exit then
+  dup ch-rparen = if drop -1 exit then
+  ch-lparen = ;
+
+\ Align heap pointer up to next 4-byte boundary.
+: align-heap ( -- )
+  heap-ptr @ 3 + 3 invert and heap-ptr ! ;
+
+\ Store one byte at heap-ptr, advance heap-ptr, update hash.
+: store-and-hash ( name-start hash char -- name-start hash' )
+  dup heap-ptr @ c!
+  heap-ptr @ 1+ heap-ptr !
+  hash-char ;
+
+\ Null-terminate the symbol name, align heap, create symbol cell.
+: finish-symbol ( name-start hash -- symbol )
+  0 heap-ptr @ c!
+  heap-ptr @ 1+ heap-ptr !
+  align-heap
+  swap make-symbol ;
+
+\ Read remaining symbol characters, building hash and storing name.
+: read-sym-loop ( name-start hash -- symbol )
+  read-char dup sym-delim?
+  if unread-char finish-symbol exit then
+  store-and-hash recurse ;
+
+\ Read a complete symbol starting from its first character.
+: read-symbol ( first-char -- symbol )
+  heap-ptr @        \ save name start address
+  swap              \ ( name-start first-char )
+  hash-init swap    \ ( name-start hash first-char )
+  store-and-hash    \ ( name-start hash' )
+  read-sym-loop ;
+
+\ Read an atom (number or symbol) starting from its first character.
+: read-atom ( first-char -- value )
+  dup digit? if
+    ch-0 - acc-digits make-fixnum exit
+  then
+  read-symbol ;
+
+\ Read a list. Inlines the lisp-read dispatch to avoid forward references
+\ (lisp-read would need to call read-list, and read-list calls lisp-read).
+: read-list ( -- val )
+  skip-ws
+  dup ch-rparen = if drop 0 exit then
+  dup ch-lparen = if
+    drop
+    recurse         \ read the sub-list
+    recurse         \ read the rest of the outer list
+    cons exit
+  then
+  read-atom         \ parse atom
+  recurse           \ read the rest of the list
+  cons ;
+
+\ Top-level reader: skip whitespace, dispatch on '(' or atom.
+: lisp-read ( -- val )
+  skip-ws
+  dup ch-lparen = if drop read-list exit then
+  read-atom ;
+
+\ Read-eval-print loop. Loops forever (exit by terminating QEMU).
+: lisp-repl ( -- )
+  begin
+    lisp-read global-env @ eval lisp-print 10 emit
+    0
+  until ;

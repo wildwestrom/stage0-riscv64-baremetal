@@ -168,8 +168,8 @@ t
   make-symbol-x 0 eval lisp-print 10 emit ;
  ok
 test-eval-define
-24
-24
+42
+42
  ok
 
  ok
@@ -193,6 +193,57 @@ test-eval-define
  ok
 test-eval-lambda
 5
+ ok
+
+ ok
+: test-read-number
+ ok
+  lisp-init
+ ok
+  lisp-read lisp-print 10 emit ;
+ ok
+test-read-number
+42
+ ok
+: test-read-symbol
+ ok
+  lisp-init
+ ok
+  lisp-read lisp-print 10 emit ;
+ ok
+test-read-symbol
+hello
+ ok
+: test-read-list
+ ok
+  lisp-init
+ ok
+  lisp-read lisp-print 10 emit ;
+ ok
+test-read-list
+(1 2 3)
+ ok
+
+ ok
+: test-read-nested
+ ok
+  lisp-init
+ ok
+  lisp-read lisp-print 10 emit ;
+ ok
+test-read-nested
+((1 2) 3)
+ ok
+
+ ok
+: test-repl-quote
+ ok
+  lisp-init
+ ok
+  lisp-read global-env @ eval lisp-print 10 emit ;
+ ok
+test-repl-quote
+(1 2)
  ok
 
  ok

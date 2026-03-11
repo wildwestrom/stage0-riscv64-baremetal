@@ -59,12 +59,12 @@ Some of these ideas feel natural and pleasant to use. Some are so academic they'
 
 This project follows the [`stage0`](https://github.com/oriansj/stage0) bootstrap philosophy — start from hex, build up through progressively more capable assemblers — but diverges after the macro assembler stage. Where `stage0` builds toward C, we don't.
 
-**Current bridge: Forth.** After the macro assembler, the chain currently goes through [DerzForth](https://github.com/theandrew168/derzforth/). Forth is a practical choice — it's simple enough to implement in macro assembly and powerful enough to build the next stage — but it's not an ideological commitment.
+**Current bridge: Forth + Lisp.** After the macro assembler, the chain goes through [DerzForth](https://github.com/theandrew168/derzforth/), then into a Lisp interpreter written in Forth. Forth is simple enough to implement in macro assembly; Lisp provides S-expressions, closures, and environments — the building blocks for a compiler.
 
 **Goal: a formally verified compiler** with correctness-oriented semantics. Formal verification appears to be the strongest answer to the question "how do we know this works?" There are many open research directions between here and there:
 
 - What are the right semantic primitives for a correctness-first language?
-- What intermediate stages are needed between Forth and a verified compiler?
+- What intermediate stages are needed between Lisp and a verified compiler?
 - What are the best abstractions for bootstrapping, and in what order should they be implemented?
 
 These are deliberate research questions, not signs of aimlessness. The path from macro assembly to a verified compiler is uncharted — that's what makes it worth exploring.
@@ -75,31 +75,36 @@ These are deliberate research questions, not signs of aimlessness. The path from
 
 The bootstrap chain has been tested on QEMU with [CHERI (Capability Hardware Enhanced RISC Instructions)](https://www.cl.cam.ac.uk/research/security/ctsrd/cheri/) support — an instruction set extension that adds capability-based security at the hardware level.
 
-The chain stages:
+The full chain:
 
-- **hex0**: Minimal hex loader - reads hex bytes from UART, stores in memory, executes on Ctrl-D
+```
+hex0 → hex1 → hex2 → M0 → DerzForth → prelude → control flow → Lisp interpreter
+```
+
+**Assembler stages:**
+
+- **hex0**: Minimal hex loader — reads hex bytes from UART, stores in memory, executes on Ctrl-D
 - **hex1**: hex0 + single-character labels (`:x` to define, `@x` for B-format branches, `$x` for J-format jumps, `~x` for U-format upper immediate, `!x` for I-format lower immediate)
 - **hex2**: hex1 + multi-character labels (`:label_name`), relative pointers (`%label`, `&label`), word literals (`.XXXXXXXX`), alignment padding (`<`)
-- **M0**: Platform specific macro assembler - adds `DEFINE name hex`, expands macros, resolves hex2-style labels/immediates, assembles in memory, and executes directly
+- **M0**: Platform-specific macro assembler — adds `DEFINE name hex`, expands macros, resolves hex2-style labels/immediates, assembles in memory, and executes directly
 
-Current working chain:
-- Generate the initial `hex0.bin` seed from the handwritten `hex0.hex0`.
-- Load `hex0.bin` into QEMU.
-- Feed `hex0.hex0` over UART.
-- Send execute signal (`0x04`/Ctrl-D).
-- Feed `hex1.hex0`
-- Send execute signal (`0x04`/Ctrl-D).
-- Feed `hex2.hex1`
-- Send execute signal (`0x04`/Ctrl-D).
-- Feed `M0.hex2`
-- Send execute signal (`0x04`/Ctrl-D).
-- Feed `derzforth.M1`.
-- Send execute signal (`0x04`/Ctrl-D).
-- Send `foo`, confirm ` ?`.
-- Send `key emit`, then `A`, confirm `A ok`.
-- Send `bye` to power off QEMU immediately when the test is done.
+**Forth stage:**
 
-`just test` is the canonical bootstrap-chain check. It boots through the full chain, then loads the current Forth lexicons and runs the Lisp smoke tests through the real bootstrap route.
+- **DerzForth**: Bare-metal Forth system assembled from M1 macro assembly. Provides a dictionary, interpreter loop, and UART I/O. Extended with 9 new primitives (`,`, `[`, `]`, `immediate`, `'`, `c@`, `c!`, `>r`, `r>`) to support compilation and control flow.
+- **prelude**: Hex value words, arithmetic, and standard Forth utilities
+- **control flow**: `if`/`then`/`else`, `begin`/`until`, `recurse` — built on `branch`/`0branch` primitives that patch the return-stack instruction pointer
+
+**Lisp stage:**
+
+A Lisp interpreter written in Forth (`lexicons/lisp.forth`), providing:
+- Bump allocator with 12-byte boxed cells (pair, fixnum, symbol, closure)
+- Symbol interning via djb2 hashing
+- S-expression reader with single-character lookahead (reads via `key`, bypassing Forth's `(` comment delimiter)
+- Evaluator with special forms (`quote`, `if`, `define`, `lambda`) and builtins (`cons`, `first`, `rest`, `pair?`, `nil?`, `eq?`)
+- Printer with proper-list shorthand
+- Interactive REPL
+
+`just test` is the canonical check. It boots through the full chain, loads all lexicons, and runs the Lisp smoke tests.
 
 We keep several reference artifacts for comparison/debugging that are not part of the real bootstrap chain.
 
@@ -177,31 +182,32 @@ This means displays, terminals (not VT-descended — maybe [Arcan-based](https:/
 
 ## Debugging
 
-I managed to get debugging to work. You'll need a few terminals open.
-
-Terminal 1 is going to have qemu running:
+There is an agent-oriented QEMU/GDB debug harness for DerzForth and the Lisp layer. It builds a debug ELF, boots QEMU under GDB, loads all lexicons, and provides a JSON command interface:
 
 ```sh
+just debug_lisp_start           # Boot and load everything, stop when Lisp-ready
+just debug_cmd status           # Check harness state
+just debug_cmd regs             # Dump registers
+just debug_cmd break <label>    # Set breakpoint
+just debug_cmd serial-write --text '(quote (1 2))\n'
+just debug_cmd continue
+just debug_cmd serial-drain     # Read serial output
+just debug_cmd stop             # Tear down session
+```
+
+For lower-level debugging (e.g. hex0), you can also use the manual multi-terminal workflow:
+
+```sh
+# Terminal 1: QEMU
 just debug_hex0
-```
 
-After that open Terminal 2 and run gdb:
-The `.gdbinit` file should set everything up.
-
-```sh
+# Terminal 2: GDB (uses .gdbinit)
 gdb
-```
 
-Then in Terminal 3, set up something to watch our pipe `qemu-dbg.out`.
-I use bat.
-
-```sh
+# Terminal 3: Watch serial output
 bat -p --paging=never qemu-dbg.out
-```
 
-In terminal 4 we'll send our text.
-
-```sh
+# Terminal 4: Send input
 echo 'test text' >> qemu-dbg.in
 ```
 
