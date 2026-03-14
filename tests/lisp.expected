@@ -196,6 +196,127 @@ test-eval-lambda
  ok
 
  ok
+: test-eval-rest
+ ok
+  lisp-init
+ ok
+  make-symbol-rest expr-cons-12 list2
+ ok
+  0 eval lisp-print 10 emit ;
+ ok
+test-eval-rest
+2
+ ok
+
+ ok
+: test-eval-pair?
+ ok
+  lisp-init
+ ok
+  make-symbol-pair? expr-cons-12 list2
+ ok
+  0 eval lisp-print 10 emit ;
+ ok
+test-eval-pair?
+t
+ ok
+
+ ok
+: test-eval-eq?
+ ok
+  lisp-init
+ ok
+  make-symbol-eq? make-symbol-t make-symbol-t list3
+ ok
+  0 eval lisp-print 10 emit ;
+ ok
+test-eval-eq?
+t
+ ok
+
+ ok
+: test-eval-eq?-false
+ ok
+  lisp-init
+ ok
+  make-symbol-eq? make-symbol-t make-symbol-nil list3
+ ok
+  0 eval lisp-print 10 emit ;
+ ok
+test-eval-eq?-false
+nil
+ ok
+
+ ok
+: test-eval-if-true
+ ok
+  lisp-init
+ ok
+  make-symbol-if make-symbol-t 1 make-fixnum 2 make-fixnum 0 cons cons cons cons
+ ok
+  0 eval lisp-print 10 emit ;
+ ok
+test-eval-if-true
+1
+ ok
+
+ ok
+: test-eval-if-false
+ ok
+  lisp-init
+ ok
+  make-symbol-if make-symbol-nil 1 make-fixnum 2 make-fixnum 0 cons cons cons cons
+ ok
+  0 eval lisp-print 10 emit ;
+ ok
+test-eval-if-false
+2
+ ok
+
+ ok
+: test-eval-t
+ ok
+  lisp-init
+ ok
+  make-symbol-t
+ ok
+  0 eval lisp-print 10 emit ;
+ ok
+test-eval-t
+t
+ ok
+
+ ok
+: test-eval-nil
+ ok
+  lisp-init
+ ok
+  make-symbol-nil
+ ok
+  0 eval lisp-print 10 emit ;
+ ok
+test-eval-nil
+nil
+ ok
+
+ ok
+: test-eval-eval
+ ok
+  lisp-init
+ ok
+  make-symbol-eval
+ ok
+  make-symbol-quote 0x20 8 + 2 + make-fixnum list2
+ ok
+  list2
+ ok
+  0 eval lisp-print 10 emit ;
+ ok
+test-eval-eval
+42
+ ok
+
+ ok
 : test-read-number
  ok
   lisp-init

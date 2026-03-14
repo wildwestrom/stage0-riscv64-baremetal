@@ -103,6 +103,62 @@ test-eval-define
   0 eval lisp-print 10 emit ;
 test-eval-lambda
 
+: test-eval-rest
+  lisp-init
+  make-symbol-rest expr-cons-12 list2
+  0 eval lisp-print 10 emit ;
+test-eval-rest
+
+: test-eval-pair?
+  lisp-init
+  make-symbol-pair? expr-cons-12 list2
+  0 eval lisp-print 10 emit ;
+test-eval-pair?
+
+: test-eval-eq?
+  lisp-init
+  make-symbol-eq? make-symbol-t make-symbol-t list3
+  0 eval lisp-print 10 emit ;
+test-eval-eq?
+
+: test-eval-eq?-false
+  lisp-init
+  make-symbol-eq? make-symbol-t make-symbol-nil list3
+  0 eval lisp-print 10 emit ;
+test-eval-eq?-false
+
+: test-eval-if-true
+  lisp-init
+  make-symbol-if make-symbol-t 1 make-fixnum 2 make-fixnum 0 cons cons cons cons
+  0 eval lisp-print 10 emit ;
+test-eval-if-true
+
+: test-eval-if-false
+  lisp-init
+  make-symbol-if make-symbol-nil 1 make-fixnum 2 make-fixnum 0 cons cons cons cons
+  0 eval lisp-print 10 emit ;
+test-eval-if-false
+
+: test-eval-t
+  lisp-init
+  make-symbol-t
+  0 eval lisp-print 10 emit ;
+test-eval-t
+
+: test-eval-nil
+  lisp-init
+  make-symbol-nil
+  0 eval lisp-print 10 emit ;
+test-eval-nil
+
+: test-eval-eval
+  lisp-init
+  make-symbol-eval
+  make-symbol-quote 0x20 8 + 2 + make-fixnum list2
+  list2
+  0 eval lisp-print 10 emit ;
+test-eval-eval
+
 : test-read-number
   lisp-init
   lisp-read lisp-print 10 emit ;

@@ -61,6 +61,7 @@
 : ch-s ch-r 1 + ;
 : ch-t ch-s 1 + ;
 : ch-u ch-t 1 + ;
+: ch-v ch-u 1 + ;
 : ch-x ch-u 3 + ;
 
 \ The Lisp heap lives well above DerzForth's growing dictionary so evaluator
@@ -136,6 +137,7 @@
 : hash-t      hash-init ch-t hash-char ;
 : hash-nil    hash-init ch-n hash-char ch-i hash-char ch-l hash-char ;
 : hash-cons   hash-init ch-c hash-char ch-o hash-char ch-n hash-char ch-s hash-char ;
+: hash-eval   hash-init ch-e hash-char ch-v hash-char ch-a hash-char ch-l hash-char ;
 : hash-first  hash-init ch-f hash-char ch-i hash-char ch-r hash-char ch-s hash-char ch-t hash-char ;
 : hash-rest   hash-init ch-r hash-char ch-e hash-char ch-s hash-char ch-t hash-char ;
 : hash-pair?  hash-init ch-p hash-char ch-a hash-char ch-i hash-char ch-r hash-char ch-? hash-char ;
@@ -250,6 +252,15 @@
   ch-? r@ 2 + c!
   0 r@ 3 + c!
   hash-eq? r> make-symbol ;
+
+: make-symbol-eval
+  8 alloc >r
+  ch-e r@ c!
+  ch-v r@ 1 + c!
+  ch-a r@ 2 + c!
+  ch-l r@ 3 + c!
+  0 r@ 4 + c!
+  hash-eval r> make-symbol ;
 
 \ Environments are lists of binding pairs: ((symbol . value) ...)
 \ These helpers stay on the data stack because DerzForth's structured control
@@ -412,6 +423,13 @@
       -rot swap third swap recurse
       eq?
       bool>lisp
+      exit
+    then
+    dup symbol-hash@ hash-eval = if
+      drop
+      2dup swap second swap recurse
+      rot drop swap
+      recurse
       exit
     then
   then

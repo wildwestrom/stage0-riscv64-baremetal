@@ -100,11 +100,11 @@ A Lisp interpreter written in Forth (`lexicons/lisp.forth`), providing:
 - Bump allocator with 12-byte boxed cells (pair, fixnum, symbol, closure)
 - Symbol interning via djb2 hashing
 - S-expression reader with single-character lookahead (reads via `key`, bypassing Forth's `(` comment delimiter)
-- Evaluator with special forms (`quote`, `if`, `define`, `lambda`) and builtins (`cons`, `first`, `rest`, `pair?`, `nil?`, `eq?`)
+- Evaluator with special forms (`quote`, `if`, `define`, `lambda`) and builtins (`cons`, `first`, `rest`, `pair?`, `nil?`, `eq?`, `eval`), with passing coverage for the current expected primitive set
 - Printer with proper-list shorthand
 - Interactive REPL
 
-`just test` is the canonical check. It boots through the full chain, loads all lexicons, and runs the Lisp smoke tests.
+`just test` is the canonical check. It boots through the full chain, loads all lexicons, and runs the Lisp test suite, including eval-level coverage for the current expected primitive set.
 
 We keep several reference artifacts for comparison/debugging that are not part of the real bootstrap chain.
 
@@ -128,7 +128,7 @@ A Nix flake is provided (`nix develop`) but is not required.
 just test
 ```
 
-This runs the full bootstrap chain on QEMU, then loads the current control and Lisp lexicons and runs the Lisp smoke tests.
+This runs the full bootstrap chain on QEMU, then loads the current control and Lisp lexicons and runs the Lisp test suite.
 
 If you have access to Nix, you can also run `nix flake test`, which does the same thing.
 
