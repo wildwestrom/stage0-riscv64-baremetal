@@ -10,6 +10,7 @@ m0_hex2 := "baremetal/M0.hex2"
 derzforth_src := "baremetal/GAS/derzforth.s"
 derzforth_elf := "build/derzforth.elf"
 derzforth_debug_elf := "build/derzforth.debug.elf"
+qemu := "qemu-system-riscv64-purecap -nographic -monitor none -machine virt -bios none -m 24M"
 asflags := "-march=rv64i -mabi=lp64"
 asflags_m0 := "-march=rv64i -mabi=lp64 --defsym M0_HEAP_BASE=0x80100000 --defsym M0_INPUT_BASE=0x80200000 --defsym M0_STACK_TOP=0x80500000"
 cflags := "-Oz -march=rv64i -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 -ffreestanding -fno-builtin -fno-stack-protector -fomit-frame-pointer -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -ffunction-sections -fdata-sections"
@@ -52,7 +53,7 @@ test_full_chain_lisp: hex0_bin
       cat lexicons/lisp.forth; \
       printf "\nlisp-init\n0x40 emit 10 emit lisp-repl\n"; \
       cat tests/lisp_test.lisp; \
-    ) | timeout "${TIMEOUT_FULL_CHAIN_LISP:-30.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{build_dir}}/hex0.bin > {{build_dir}}/full_chain_lisp.out 2>/dev/null || status=$?; \
+    ) | timeout "${TIMEOUT_FULL_CHAIN_LISP:-30.0s}" {{qemu}} -serial stdio -kernel {{build_dir}}/hex0.bin > {{build_dir}}/full_chain_lisp.out 2>/dev/null || status=$?; \
     sed -n "/^@\$/,\${/^@\$/d;p}" {{build_dir}}/full_chain_lisp.out > {{build_dir}}/full_chain_lisp.actual; \
     if [[ "$status" -eq 0 || "$status" -eq 124 ]] && cmp -s {{build_dir}}/full_chain_lisp.actual tests/lisp.expected; then \
       printf "PASS test_full_chain_lisp\n"; \
@@ -69,7 +70,7 @@ debug_hex0:
     {{cc}} {{ldflags_debug}} {{build_dir}}/hex0.o -o {{build_dir}}/hex0.debug.elf; \
     rm -f qemu-dbg.in qemu-dbg.out; \
     mkfifo qemu-dbg.in qemu-dbg.out; \
-    exec qemu-system-riscv64-purecap -nographic -monitor none -serial pipe:qemu-dbg -machine virt -bios none -kernel {{build_dir}}/hex0.debug.elf -gdb tcp::1234 \
+    exec {{qemu}} -serial pipe:qemu-dbg -kernel {{build_dir}}/hex0.debug.elf -gdb tcp::1234 \
   '
 
 derzforth_elf:
@@ -81,14 +82,14 @@ derzforth_debug_elf:
   {{cc}} {{ldflags_debug}} {{derzforth_src}} -o {{derzforth_debug_elf}}
 
 run_derzforth: derzforth_elf
-  exec qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{derzforth_elf}}
+  exec {{qemu}} -serial stdio -kernel {{derzforth_elf}}
 
 test_derzforth: derzforth_elf
   bash -euxo pipefail -c '\
     mkdir -p {{build_dir}}; \
     rm -f {{build_dir}}/derzforth.out {{build_dir}}/derzforth.actual; \
     status=0; \
-    printf "\nfoo\nkey emit\nA\nbye\n" | timeout "${TIMEOUT_DERZFORTH:-5.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{derzforth_elf}} > {{build_dir}}/derzforth.out 2>/dev/null || status=$?; \
+    printf "\nfoo\nkey emit\nA\nbye\n" | timeout "${TIMEOUT_DERZFORTH:-5.0s}" {{qemu}} -serial stdio -kernel {{derzforth_elf}} > {{build_dir}}/derzforth.out 2>/dev/null || status=$?; \
     sed -n "/^foo$/,\$p" {{build_dir}}/derzforth.out > {{build_dir}}/derzforth.actual; \
     if [[ "$status" -eq 0 ]] && cmp -s {{build_dir}}/derzforth.actual tests/derzforth.expected; then \
       printf "PASS test_derzforth\n"; \
@@ -109,7 +110,7 @@ test_control: derzforth_elf
     printf "\n" >> {{build_dir}}/control.stdin; \
     cat lexicons/tests/control_test.forth >> {{build_dir}}/control.stdin; \
     status=0; \
-    timeout "${TIMEOUT_CONTROL:-8.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{derzforth_elf}} < {{build_dir}}/control.stdin > {{build_dir}}/control.out 2>/dev/null || status=$?; \
+    timeout "${TIMEOUT_CONTROL:-8.0s}" {{qemu}} -serial stdio -kernel {{derzforth_elf}} < {{build_dir}}/control.stdin > {{build_dir}}/control.out 2>/dev/null || status=$?; \
     sed -n "/^test-if$/,\$p" {{build_dir}}/control.out > {{build_dir}}/control.actual; \
     if [[ "$status" -eq 0 ]] && cmp -s {{build_dir}}/control.actual tests/control.expected; then \
       printf "PASS test_control\n"; \
