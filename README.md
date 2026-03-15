@@ -223,6 +223,8 @@ echo 'test text' >> qemu-dbg.in
 
 I made heavy use of LLMs in doing this and I'm not proud. Yes, I understand that "root of trust"/"trusting trust" is the very problem `stage0` is trying to solve, but I really don't care enough to audit machine code seeds myself right now.
 
+I did however audit the first machine code seed, `hex0.hex0`. It is arguably the most important one.
+
 ## License
 
 This repository is mixed-license.
