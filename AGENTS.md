@@ -76,14 +76,3 @@ Important details:
 
 Use `just annotate_hex0` to generate a heavily annotated version of hex machine code.
 This validates that the jump and label addresses are correct, and does its best to break down each machine instruction by byte.
-
-## Plan Maintenance
-
-`PLAN.md` is the living roadmap for this project. Keep it current as you work:
-
-1. **Update as you go** — PLAN.md should reflect reality, not aspirations from three sessions ago.
-2. **Collapse completed phases** — when a phase/task is done, replace its detail with a one-line summary (e.g., `~~Phase 2: Token reader~~ — Done.`). Don't delete entirely; keep the record.
-3. **Annotate active work** — when starting a phase, add implementation notes and any deviations from the original plan.
-4. **Add new items** — when bugs or new requirements surface, add them under an appropriate section.
-5. **Keep "next up" accurate** — the next agent should be able to read PLAN.md and know exactly where to pick up.
-6. **Prune stale detail** — completed implementation notes waste context and can mislead. Collapse them.
