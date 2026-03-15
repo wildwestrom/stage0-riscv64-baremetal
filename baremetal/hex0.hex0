@@ -18,7 +18,7 @@
 # Reads hex digits from UART, converts pairs to bytes, stores in memory.
 # On Ctrl-D, jumps to the loaded code.
 
-# Audited by Christian Westrom: 2026-03-15, 08:38 UTC
+# Audited by Christian Westrom: 2026-03-15, 08:53 UTC
 
 ; Register use:
 ; s0: holder (first nibble)
@@ -142,8 +142,17 @@
     67 80 00 00       # jalr x0, ra, 0
 
 # ignore_byte: (0xDC)
-    # Anything else we ignore and to the main loop
-    # (TODO: Figure out if this messes with the nibble register in edge cases)
+    # Returns -1 to signal the caller to discard this character.
+    #
+    # Behavioral note: non-hex characters (including whitespace, newlines, and
+    # comments) are transparent to nibble pairing. This means hex digits CAN be
+    # split across a comment or newline and will still combine into one byte.
+    #
+    # Example: "A # comment\nB" produces byte 0xAB.
+    # This matches the hex0 spec (non-hex = ignored), but may be surprising.
+    #
+    # Also: if Ctrl-D arrives while s1==0 (a first nibble was stored but no
+    # second arrived), the partial nibble in s0 is silently discarded.
     13 05 F0 FF       # addi a0, x0, -1
     67 80 00 00       # jalr x0, ra, 0
 
@@ -200,14 +209,14 @@
     93 0C 00 00       # addi s9, x0, 0
     13 0D 00 00       # addi s10, x0, 0
     93 0D 00 00       # addi s11, x0, 0
-		# Jump to CODE_BASE (0x1190) using PC-relative addressing
-		# auipc captures the current PC (0x174) and adds one 4KB page -> 0x1174
+    # Jump to CODE_BASE (0x1190) using PC-relative addressing
+    # auipc captures the current PC (0x174) and adds one 4KB page -> 0x1174
     97 12 00 00       # auipc t0, 0x1
-		# Adds 0x1C to bridge from 0x1174 to CODE_BASE (0x1190)
+    # Adds 0x1C to bridge from 0x1174 to CODE_BASE (0x1190)
     93 82 C2 01       # addi t0, t0, 0x1C
-		# Jump to CODE_BASE, discard return address
+    # Jump to CODE_BASE, discard return address
     67 80 02 00       # jalr x0, t0, 0
 
 # done: (0x180)
-		# Infinite loop
+    # Infinite loop
     6F 00 00 00       # jal x0, done (0x180)
