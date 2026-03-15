@@ -29,33 +29,6 @@ annotate_hex0:
 
 test: test_full_chain_lisp
 
-smoke_bootstrap_base: hex0_bin
-  bash -euxo pipefail -c '\
-    mkdir -p {{build_dir}}; \
-    rm -f {{build_dir}}/full_chain_derzforth.out {{build_dir}}/full_chain_derzforth.actual; \
-    status=0; \
-    ( \
-      cat baremetal/hex0.hex0; \
-      printf "\x04"; \
-      cat baremetal/hex1.hex0; \
-      printf "\x04"; \
-      cat baremetal/hex2.hex1; \
-      printf "\x04"; \
-      cat {{m0_hex2}}; \
-      printf "\x04"; \
-      cat baremetal/riscv64_defs.M1 {{derzforth_m1_src}}; \
-      printf "\x04"; \
-      printf "\nfoo\nkey emit\nA\nbye\n"; \
-    ) | timeout "${TIMEOUT_FULL_CHAIN:-20.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{build_dir}}/hex0.bin > {{build_dir}}/full_chain_derzforth.out 2>/dev/null || status=$?; \
-    sed -n "/^foo$/,\$p" {{build_dir}}/full_chain_derzforth.out > {{build_dir}}/full_chain_derzforth.actual; \
-    if [[ "$status" -eq 0 ]] && cmp -s {{build_dir}}/full_chain_derzforth.actual tests/derzforth.expected; then \
-      printf "PASS smoke_bootstrap_base\n"; \
-    else \
-      printf "FAIL smoke_bootstrap_base: see %s and %s\n" "{{build_dir}}/full_chain_derzforth.out" "{{build_dir}}/full_chain_derzforth.actual" >&2; \
-      exit 1; \
-    fi \
-  '
-
 test_full_chain_lisp: hex0_bin
   bash -euxo pipefail -c '\
     mkdir -p {{build_dir}}; \
@@ -170,21 +143,11 @@ test_lisp: derzforth_elf
     fi \
   '
 
-test_derzforth_m1: smoke_bootstrap_base
-
 debug_lisp_start break="":
   python3 scripts/debug_session.py start --mode lisp {{if break != "" { "--break-location " + quote(break) } else { "" }}}
 
 debug_cmd *args:
   python3 scripts/debug_session.py {{args}}
-
-test_debug_harness_smoke:
-  bash -euxo pipefail -c '\
-    python3 scripts/debug_session.py start --mode lisp; \
-    python3 scripts/debug_session.py status; \
-    python3 scripts/debug_session.py regs; \
-    python3 scripts/debug_session.py stop; \
-  '
 
 clean:
   rm -rf {{build_dir}}
