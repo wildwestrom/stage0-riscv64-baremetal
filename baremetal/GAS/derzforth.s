@@ -29,9 +29,10 @@ _start:
 ## SOFTWARE.
 ##
 
-## GNU assembler port of DerzForth for the QEMU `virt` machine used in this
-## repository. This file is checked in intentionally; do not regenerate it at
-## build time. See LICENSES/MIT.txt for the canonical license text.
+## GNU assembler port of baremetal/derzforth.M1 for the QEMU `virt` machine
+## used in this repository. Keep instruction selection, dictionary layout, and
+## fixed memory addresses in sync with the M1 source of truth. See
+## LICENSES/MIT.txt for the canonical license text.
 
 # jump to "main" since programs execute top to bottom
 # we do this to enable writing helper funcs at the top
@@ -53,44 +54,38 @@ _start:
     .include "baremetal/GAS/derzforth_qemu_virt_board.inc"
 
 
-#  28KB      Memory Map
+#  16KB      Memory Map
 # 0x0000 |----------------|
 #        |                |
 #        |                |
 #        |                |
 #        |   Interpreter  |
-#        |       +        | 24KB
+#        |       +        | 12KB
 #        |   Dictionary   |
 #        |                |
 #        |                |
 #        |                |
-# 0x6000 |----------------|
+# 0x3000 |----------------|
 #        |      s2       | 1KB
-# 0x6400 |----------------|
+# 0x3400 |----------------|
 #        |  Return Stack  | 1KB (256 calls deep)
-# 0x6800 |----------------|
+# 0x3800 |----------------|
 #        |                |
 #        |   Data Stack   | 2KB (512 elements)
 #        |                |
-# 0x7000 |----------------|
-#
-# The Lisp layer and its test helpers now define enough words that the old 12KB
-# dictionary region overflowed into the TIB around `make-symbol-x`. Keep the
-# transient buffers and stacks where they are conceptually, but give the
-# threaded dictionary more headroom so test-only definitions do not corrupt the
-# input buffer.
+# 0x4000 |----------------|
 
     .equ INTERPRETER_BASE_ADDR, 0x0000
-    .equ TIB_BASE_ADDR, 0x6000
-    .equ RETURN_STACK_BASE_ADDR, 0x6400
-    .equ DATA_STACK_BASE_ADDR, 0x6800
+    .equ TIB_BASE_ADDR, 0x3000
+    .equ RETURN_STACK_BASE_ADDR, 0x3400
+    .equ DATA_STACK_BASE_ADDR, 0x3800
 
-    .equ INTERPRETER_SIZE, 0x6000  # 24KB
+    .equ INTERPRETER_SIZE, 0x3000  # 12KB
     .equ TIB_SIZE, 0x0400  # 1KB
     .equ RETURN_STACK_SIZE, 0x0400  # 1KB
     .equ DATA_STACK_SIZE, 0x0800  # 2KB
 
-    .equ DERZFORTH_SIZE, 0x7000  # 28KB
+    .equ DERZFORTH_SIZE, 0x4000  # 16KB
     .equ HEAP_BASE_ADDR, RAM_BASE_ADDR + DERZFORTH_SIZE
     .equ HEAP_SIZE, RAM_SIZE - DERZFORTH_SIZE
 

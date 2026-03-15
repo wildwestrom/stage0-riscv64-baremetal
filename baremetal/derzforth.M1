@@ -2,9 +2,9 @@
 ## SPDX-FileCopyrightText: 2026 Christian Westrom
 ## SPDX-License-Identifier: MIT
 ##
-## Hand-written M1 port of baremetal/GAS/derzforth.s for the QEMU virt board.
-## This file is derived from DerzForth by Andrew Dailey. See LICENSES/MIT.txt
-## for the canonical license text.
+## Canonical M1 implementation of DerzForth for the QEMU virt board.
+## baremetal/GAS/derzforth.s is a manually maintained GNU assembler port of
+## this file. See LICENSES/MIT.txt for the canonical license text.
 ##
 ## Copyright (c) 2021 Andrew Dailey
 ## Copyright (c) 2026 Christian Westrom
@@ -195,6 +195,12 @@
 :reset
     RD_S0 ADDI
     RD_S1 ADDI
+
+    # Keep these fixed addresses in sync with baremetal/GAS/derzforth.s:
+    # interpreter/dictionary = 0x80000000-0x80002FFF
+    # tib                    = 0x80003000-0x800033FF
+    # return stack           = 0x80003400-0x800037FF
+    # data stack             = 0x80003800-0x80003FFF
 
     # sp = 0x80003800
     RD_SP ~0x20000 LUI
