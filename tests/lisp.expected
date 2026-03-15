@@ -409,4 +409,121 @@ test-string-rest-chars
  ok
 
  ok
+: test-add
+ ok
+  lisp-init
+ ok
+  lisp-read global-env @ eval lisp-print 10 emit ;
+ ok
+test-add
+3
+ ok
+
+ ok
+
+ ok
+: test-sub
+ ok
+  lisp-init
+ ok
+  lisp-read global-env @ eval lisp-print 10 emit ;
+ ok
+test-sub
+2
+ ok
+
+ ok
+
+ ok
+: test-lt-true
+ ok
+  lisp-init
+ ok
+  lisp-read global-env @ eval lisp-print 10 emit ;
+ ok
+test-lt-true
+t
+ ok
+
+ ok
+
+ ok
+: test-lt-false
+ ok
+  lisp-init
+ ok
+  lisp-read global-env @ eval lisp-print 10 emit ;
+ ok
+test-lt-false
+nil
+ ok
+
+ ok
+
+ ok
+: test-eqn-true
+ ok
+  lisp-init
+ ok
+  lisp-read global-env @ eval lisp-print 10 emit ;
+ ok
+test-eqn-true
+t
+ ok
+
+ ok
+
+ ok
+: test-eqn-false
+ ok
+  lisp-init
+ ok
+  lisp-read global-env @ eval lisp-print 10 emit ;
+ ok
+test-eqn-false
+nil
+ ok
+
+ ok
+
+ ok
+: test-begin
+ ok
+  lisp-init
+ ok
+  lisp-read global-env @ eval lisp-print 10 emit ;
+ ok
+test-begin
+3
+ ok
+
+ ok
+
+ ok
+: test-let
+ ok
+  lisp-init
+ ok
+  lisp-read global-env @ eval lisp-print 10 emit ;
+ ok
+test-let
+3
+ ok
+
+ ok
+
+ ok
+: test-letrec
+ ok
+  lisp-init
+ ok
+  lisp-read global-env @ eval lisp-print 10 emit ;
+ ok
+test-letrec
+7
+ ok
+
+ ok
+
+ ok
 bye

@@ -742,7 +742,7 @@
 :latest
 :word_execute
     &word_lit
-    %0x81C09678
+    %0x01C09678
 :code_execute
     &body_execute
 :body_execute

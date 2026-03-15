@@ -203,4 +203,58 @@ test-string-first-char
 test-string-rest-chars
 (rest "Hello")
 
+: test-add
+  lisp-init
+  lisp-read global-env @ eval lisp-print 10 emit ;
+test-add
+(+ 1 2)
+
+: test-sub
+  lisp-init
+  lisp-read global-env @ eval lisp-print 10 emit ;
+test-sub
+(- 5 3)
+
+: test-lt-true
+  lisp-init
+  lisp-read global-env @ eval lisp-print 10 emit ;
+test-lt-true
+(< 3 4)
+
+: test-lt-false
+  lisp-init
+  lisp-read global-env @ eval lisp-print 10 emit ;
+test-lt-false
+(< 4 3)
+
+: test-eqn-true
+  lisp-init
+  lisp-read global-env @ eval lisp-print 10 emit ;
+test-eqn-true
+(= 5 5)
+
+: test-eqn-false
+  lisp-init
+  lisp-read global-env @ eval lisp-print 10 emit ;
+test-eqn-false
+(= 5 6)
+
+: test-begin
+  lisp-init
+  lisp-read global-env @ eval lisp-print 10 emit ;
+test-begin
+(begin 1 2 3)
+
+: test-let
+  lisp-init
+  lisp-read global-env @ eval lisp-print 10 emit ;
+test-let
+(let ((x 1) (y 2)) (+ x y))
+
+: test-letrec
+  lisp-init
+  lisp-read global-env @ eval lisp-print 10 emit ;
+test-letrec
+(letrec ((f (lambda (n) (if (= n 0) 1 (+ n (f (- n 1))))))) (f 3))
+
 bye

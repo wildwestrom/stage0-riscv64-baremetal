@@ -800,7 +800,7 @@ body_lit:
 latest:  # mark the latest builtin word
 word_execute:
     .word word_lit
-    .word 0x81c09678  # djb2_hash('execute')
+    .word 0x01c09678  # djb2_hash('execute') with flag bits cleared
 code_execute:
     .word body_execute
 body_execute:

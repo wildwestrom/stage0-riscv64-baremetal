@@ -32,6 +32,10 @@
 : -rot  swap >r swap r> ;
 : <     - 0x80000000 and ;  \ signed less-than for small same-width values
 : >=    < 0= ;
+\ Compile-time tick: ['] word  compiles  lit <CFA-of-word>  into the current
+\ definition.  ' alone only works in interpretation mode because it reads the
+\ next token from the input buffer at runtime.
+: [']   '   lit [ ' lit , ] ,   , ; immediate
 : 10*   dup 2* 2* + 2* ;
 
 \ Character constants used by symbol constructors and printing.
@@ -39,7 +43,10 @@
 : ch-!     0x20 1 + ;
 : ch-lparen 0x20 8 + ;
 : ch-rparen ch-lparen 1 + ;
+: ch-+     0x20 8 + 2 + 1 + ;  \ ASCII 0x2B = 43
 : ch--     0x20 8 + 4 + 1 + ;
+: ch-<     0x20 0x10 + 8 + 4 + ;  \ ASCII 0x3C = 60
+: ch-=     0x20 0x10 + 8 + 4 + 1 + ;  \ ASCII 0x3D = 61
 : ch-.     0x20 8 + 4 + 2 + ;
 : ch-0     0x20 0x10 + ;
 : ch-?     0x20 0x10 + 8 + 4 + 2 + 1 + ;
@@ -50,6 +57,8 @@
 : ch-d ch-c 1 + ;
 : ch-e ch-d 1 + ;
 : ch-f ch-e 1 + ;
+: ch-g ch-f 1 + ;
+: ch-h ch-f 2 + ;
 : ch-i ch-f 3 + ;
 : ch-l ch-i 3 + ;
 : ch-m ch-l 1 + ;
@@ -72,7 +81,8 @@
 : true-symbol heap-ptr 8 + ;
 : nil-symbol  heap-ptr 0x0c + ;
 : lookahead   heap-ptr 0x10 + ;
-: heap-start  heap-ptr 0x14 + ;
+: eval-ptr    heap-ptr 0x14 + ;   \ deferred CFA of `eval` (patched in lisp-init)
+: heap-start  heap-ptr 0x18 + ;
 
 : alloc ( size -- addr )
   heap-ptr @ dup rot + heap-ptr ! ;
@@ -96,8 +106,10 @@
 : make-fixnum  ( n -- value )               1 swap 0 make-cell ;
 : make-symbol  ( hash name -- value )       2 -rot make-cell ;
 : make-closure ( params body-env -- value ) 3 -rot make-cell ;
-: make-string  ( addr -- value )  4 swap 0 make-cell ;
-: string-addr@ ( string -- addr ) field1@ ;
+: make-string    ( addr -- value )  4 swap 0 make-cell ;
+: string-addr@   ( string -- addr ) field1@ ;
+: make-primitive ( cfa -- value )  5 swap 0 make-cell ;
+: primitive-cfa@ ( prim -- cfa )   field1@ ;
 
 : first        ( pair -- car )   field1@ ;
 : rest         ( pair -- cdr )   field2@ ;
@@ -114,9 +126,10 @@
 : pair?     ( value -- flag ) dup nil? if drop 0 exit then tag@ 0= ;
 : fixnum?   ( value -- flag ) dup nil? if drop 0 exit then tag@ 1 = ;
 : symbol?   ( value -- flag ) dup nil? if drop 0 exit then tag@ 2 = ;
-: closure?  ( value -- flag ) dup nil? if drop 0 exit then tag@ 3 = ;
-: string?   ( value -- flag ) dup nil? if drop 0 exit then tag@ 4 = ;
-: eq?       ( a b -- flag ) = ;
+: closure?    ( value -- flag ) dup nil? if drop 0 exit then tag@ 3 = ;
+: string?     ( value -- flag ) dup nil? if drop 0 exit then tag@ 4 = ;
+: primitive?  ( value -- flag ) dup nil? if drop 0 exit then tag@ 5 = ;
+: eq?         ( a b -- flag ) = ;
 
 : second ( list -- value ) rest first ;
 : third  ( list -- value ) rest rest first ;
@@ -147,6 +160,13 @@
 : hash-pair?  hash-init ch-p hash-char ch-a hash-char ch-i hash-char ch-r hash-char ch-? hash-char ;
 : hash-nil?   hash-init ch-n hash-char ch-i hash-char ch-l hash-char ch-? hash-char ;
 : hash-eq?    hash-init ch-e hash-char ch-q hash-char ch-? hash-char ;
+: hash-+      hash-init ch-+ hash-char ;
+: hash---     hash-init ch-- hash-char ;
+: hash-<      hash-init ch-< hash-char ;
+: hash-=      hash-init ch-= hash-char ;
+: hash-begin  hash-init ch-b hash-char ch-e hash-char ch-g hash-char ch-i hash-char ch-n hash-char ;
+: hash-let    hash-init ch-l hash-char ch-e hash-char ch-t hash-char ;
+: hash-letrec hash-init ch-l hash-char ch-e hash-char ch-t hash-char ch-r hash-char ch-e hash-char ch-c hash-char ;
 
 \ Small symbol constructors keep quoted forms and tests readable.
 : make-symbol-t
@@ -266,6 +286,30 @@
   0 r@ 4 + c!
   hash-eval r> make-symbol ;
 
+: make-symbol-+
+  4 alloc >r
+  ch-+ r@ c!
+  0 r@ 1 + c!
+  hash-+ r> make-symbol ;
+
+: make-symbol--
+  4 alloc >r
+  ch-- r@ c!
+  0 r@ 1 + c!
+  hash--- r> make-symbol ;
+
+: make-symbol-<
+  4 alloc >r
+  ch-< r@ c!
+  0 r@ 1 + c!
+  hash-< r> make-symbol ;
+
+: make-symbol-=
+  4 alloc >r
+  ch-= r@ c!
+  0 r@ 1 + c!
+  hash-= r> make-symbol ;
+
 \ Environments are lists of binding pairs: ((symbol . value) ...)
 \ These helpers stay on the data stack because DerzForth's structured control
 \ flow rewrites the top of the return stack in-place.
@@ -292,12 +336,15 @@
   2dup cons global-env @ cons global-env !
   nip ;
 
-\ Lambda application currently only needs one positional binding for the tests:
-\ build (symbol . value) and cons it onto the captured environment.
-: extend-env1 ( value symbol env -- env' )
+\ Extend an environment by zipping a list of values with a list of parameter
+\ symbols. Each (param . val) binding is prepended onto the environment.
+: extend-env-list ( vals params env -- env' )
+  over nil? if -rot 2drop exit then
   >r
-  swap cons
-  r> cons ;
+  2dup swap first swap first swap cons
+  r> cons
+  -rot rest swap rest swap rot
+  recurse ;
 
 : lisp-true ( -- value )
   true-symbol @ dup nil?
@@ -332,6 +379,8 @@
   dup fixnum? if fixnum>n print-number exit then
   dup symbol? if symbol-name@ print-string exit then
   dup string? if ch-dquote emit string-addr@ print-string ch-dquote emit exit then
+  dup closure? if drop ch-lparen emit ch-f emit ch-n emit ch-rparen emit exit then
+  dup primitive? if drop ch-lparen emit ch-p emit ch-r emit ch-i emit ch-m emit ch-rparen emit exit then
   dup pair? if
     ch-lparen emit
     begin
@@ -345,9 +394,103 @@
   drop
   ch-? emit ;
 
+\ ===== Primitive implementations =====
+\ Each primitive takes ( arglist env -- value ). The arglist contains already-
+\ evaluated arguments. Most primitives ignore env (drop it immediately).
+
+: prim-cons ( args env -- value )
+  drop dup first swap rest first cons ;
+
+: prim-first ( args env -- value )
+  drop first
+  dup string? if string-addr@ c@ make-fixnum exit then
+  first ;
+
+: prim-rest ( args env -- value )
+  drop first
+  dup string? if string-addr@ 1+ make-string exit then
+  rest ;
+
+: prim-pair? ( args env -- value )
+  drop first pair? bool>lisp ;
+
+: prim-nil? ( args env -- value )
+  drop first nil? bool>lisp ;
+
+: prim-eq? ( args env -- value )
+  drop dup first swap rest first eq? bool>lisp ;
+
+\ prim-eval re-evaluates its argument in the caller's environment.
+: prim-eval ( args env -- value )
+  swap first swap eval-ptr @ execute ;
+
+\ Arithmetic primitives: extract two fixnum args, compute, re-box.
+: prim-add ( args env -- value )
+  drop dup first fixnum>n swap rest first fixnum>n + make-fixnum ;
+
+: prim-sub ( args env -- value )
+  drop dup first fixnum>n swap rest first fixnum>n - make-fixnum ;
+
+: prim-lt ( args env -- value )
+  drop dup first fixnum>n swap rest first fixnum>n < bool>lisp ;
+
+: prim-eqn ( args env -- value )
+  drop dup first fixnum>n swap rest first fixnum>n = bool>lisp ;
+
+\ Evaluate each element of a list in env, returning a new list of results.
+\ Uses eval-ptr to call eval (forward reference patched in lisp-init).
+: eval-args ( list env -- arglist )
+  over nil? if drop exit then
+  2dup swap first swap eval-ptr @ execute
+  >r swap rest swap recurse
+  r> swap cons ;
+
+\ ===== Let/letrec helpers =====
+
+\ Evaluate let-bindings: ((x expr1) (y expr2) ...) env
+\ Returns list of (symbol . value) pairs.
+: eval-let-bindings ( bindings env -- alist )
+  over nil? if drop exit then
+  2dup swap first             \ ( bindings env binding )
+  dup first >r                \ save symbol; ( bindings env binding )
+  rest first                  \ ( bindings env rhs )
+  swap eval-ptr @ execute     \ ( bindings val )  -- eval rhs in env
+  r> swap cons                \ ( bindings (sym . val) )
+  >r swap rest swap recurse   \ ( rest-alist )
+  r> swap cons ;
+
+\ Prepend a list of (sym . val) bindings onto an env.
+: prepend-bindings ( alist env -- env' )
+  over nil? if nip exit then
+  over first -rot             \ ( binding alist env )
+  swap rest swap              \ ( binding rest-alist env )
+  recurse cons ;              \ ( (binding . env') )
+
+\ Make placeholder bindings for letrec: given ((x e1) (y e2) ...) return
+\ ((x . 0) (y . 0) ...) — values will be patched later.
+: make-placeholders ( bindings -- alist )
+  dup nil? if exit then
+  dup first first 0 cons      \ ( bindings (sym . 0) )
+  swap rest recurse           \ ( (sym.0) rest-alist )
+  cons ;
+
+\ Fill letrec placeholders: evaluate each rhs in env, set-rest! on binding.
+\ bindings = source ((x e1) ...), alist = ((x . 0) ...).
+: fill-letrec ( bindings alist env -- )
+  over nil? if 2drop drop exit then
+  >r                          \ save env
+  over first rest first       \ ( bindings alist rhs )
+  r@ eval-ptr @ execute       \ ( bindings alist val )
+  over first set-rest!        \ mutate placeholder
+  swap rest swap rest r>      \ ( rest-bindings rest-alist env )
+  recurse ;
+
+\ ===== Evaluator =====
 \ `eval` keeps `env` on the data stack. In this system `if`/`until` patch the
 \ saved instruction pointer at the top of the return stack, so `>r` cannot hold
 \ Lisp data across structured control flow without corrupting execution.
+\ Within a straight-line block (no if/until between >r and r>), >r is safe
+\ because called words push/pop their own frames above our saved values.
 : eval ( expr env -- value )
   over nil? if drop exit then
   over fixnum? if drop exit then
@@ -358,6 +501,7 @@
     resolve-binding dup nil? if drop 0 exit then binding-value exit
   then
 
+  \ --- Special forms (only these need unevaluated arguments) ---
   over first dup symbol?
   if
     dup symbol-hash@ hash-quote = if
@@ -386,89 +530,99 @@
       make-closure
       exit
     then
-    dup symbol-hash@ hash-cons = if
+    dup symbol-hash@ hash-begin = if
       drop
-      2dup swap second swap recurse
-      -rot swap third swap recurse
-      cons
-      exit
+      \ (begin e1 e2 ... en) env -- evaluate all, return last
+      swap rest swap           \ skip 'begin symbol
+      begin
+        over rest nil? if      \ last form?
+          swap first swap recurse exit
+        then
+        2dup swap first swap eval-ptr @ execute drop
+        swap rest swap         \ advance to next form
+      0 until
     then
-    dup symbol-hash@ hash-first = if
+    dup symbol-hash@ hash-let = if
       drop
-      2dup swap second swap recurse
-      nip nip
-      dup string? if string-addr@ c@ make-fixnum exit then
-      first
-      exit
-    then
-    dup symbol-hash@ hash-rest = if
-      drop
-      2dup swap second swap recurse
-      nip nip
-      dup string? if string-addr@ 1+ make-string exit then
-      rest
-      exit
-    then
-    dup symbol-hash@ hash-pair? = if
-      drop
-      2dup swap second swap recurse
-      nip nip
-      pair?
-      bool>lisp
-      exit
-    then
-    dup symbol-hash@ hash-nil? = if
-      drop
-      2dup swap second swap recurse
-      nip nip
-      nil?
-      bool>lisp
-      exit
-    then
-    dup symbol-hash@ hash-eq? = if
-      drop
-      2dup swap second swap recurse
-      -rot swap third swap recurse
-      eq?
-      bool>lisp
-      exit
-    then
-    dup symbol-hash@ hash-eval = if
-      drop
-      2dup swap second swap recurse
-      rot drop swap
+      \ (let ((x e1) ...) body) env
+      2dup swap second swap    \ ( expr env bindings env )
+      eval-let-bindings        \ ( expr env alist )
+      >r                       \ RS: alist; ( expr env )
+      swap third               \ ( env body )
+      swap r>                  \ ( body env alist )
+      swap prepend-bindings    \ ( body env' )
       recurse
       exit
+    then
+    dup symbol-hash@ hash-letrec = if
+      drop
+      \ (letrec ((x e1) ...) body) env
+      swap dup third           \ ( env expr body )
+      >r                       \ RS: body; ( env expr )
+      second                   \ ( env bindings )
+      dup make-placeholders    \ ( env bindings alist )
+      rot                      \ ( bindings alist env )
+      over swap                \ ( bindings alist alist env )
+      prepend-bindings         \ ( bindings alist letrec-env )
+      dup >r                   \ RS: body letrec-env
+      fill-letrec              \ mutates alist in place; ( )
+      r> r>                    \ ( letrec-env body )
+      swap recurse exit
     then
   then
   drop
 
+  \ --- General application: evaluate operator, then dispatch ---
   over first over recurse
+
   dup closure? if
-    -rot over second swap recurse
-    swap drop
-    swap
+    >r                            \ save closure
+    swap rest swap                \ ( args-unevaled env )
+    eval-args                     \ ( arglist )
+    r>                            \ ( arglist closure )
     dup closure-body >r
     dup closure-env >r
-    closure-params first
-    r> extend-env1
+    closure-params
+    r> extend-env-list
     r> swap
     recurse
+    exit
+  then
+
+  dup primitive? if
+    >r                            \ save primitive
+    dup >r                        \ save env
+    swap rest swap                \ ( args-unevaled env )
+    eval-args                     \ ( arglist )
+    r>                            \ ( arglist env )
+    r>                            \ ( arglist env prim )
+    primitive-cfa@ execute
     exit
   then
 
   2drop
   0 ;
 
-\ The global environment only needs `t` and `nil` so far. Builtins are handled
-\ directly by `eval` until the raw reader and a more general applicative layer
-\ exist.
+\ Initialise the Lisp heap, patch the eval forward reference, and register
+\ all primitive functions in the global environment.
 : lisp-init ( -- )
   heap-start heap-ptr !
   0 global-env !
   0 true-symbol !
   0 nil-symbol !
-  -1 lookahead ! ;
+  -1 lookahead !
+  ['] eval eval-ptr !
+  make-symbol-cons  ['] prim-cons  make-primitive bind-global drop
+  make-symbol-first ['] prim-first make-primitive bind-global drop
+  make-symbol-rest  ['] prim-rest  make-primitive bind-global drop
+  make-symbol-pair? ['] prim-pair? make-primitive bind-global drop
+  make-symbol-nil?  ['] prim-nil?  make-primitive bind-global drop
+  make-symbol-eq?   ['] prim-eq?   make-primitive bind-global drop
+  make-symbol-eval  ['] prim-eval  make-primitive bind-global drop
+  make-symbol-+     ['] prim-add   make-primitive bind-global drop
+  make-symbol--     ['] prim-sub   make-primitive bind-global drop
+  make-symbol-<     ['] prim-lt    make-primitive bind-global drop
+  make-symbol-=     ['] prim-eqn   make-primitive bind-global drop ;
 
 \ ===== Reader =====
 \ Reads S-expressions character-by-character via `key`, building boxed cells.
