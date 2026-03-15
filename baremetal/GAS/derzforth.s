@@ -783,7 +783,6 @@ body_rfrom:
     j next
 
     .balign 4
-latest:  # mark the latest builtin word
 word_lit:
     .word word_rfrom
     .word 0x0b888c4e  # djb2_hash('lit')
@@ -796,6 +795,21 @@ body_lit:
     sw t0, 0(sp)
     addi sp, sp, 4
     j next
+
+    .balign 4
+latest:  # mark the latest builtin word
+word_execute:
+    .word word_lit
+    .word 0x81c09678  # djb2_hash('execute')
+code_execute:
+    .word body_execute
+body_execute:
+    # Pop CFA from data stack and execute the word it points to.
+    # Sets s0 = CFA (so enter can compute the body address as s0+4).
+    addi sp, sp, -4
+    lwu s0, 0(sp)      # s0 = CFA
+    lwu t0, 0(s0)      # t0 = code pointer at [CFA]
+    jr t0               # jump to the word's code
 
     .balign 4
 here:  # next new word will go here

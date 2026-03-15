@@ -726,7 +726,6 @@
     $next JAL
 
 <
-:latest
 :word_lit
     &word_rfrom
     %0x0B888C4E
@@ -738,6 +737,21 @@
     RS1_SP RS2_T0 SW
     RD_SP RS1_SP !4 ADDI
     $next JAL
+
+<
+:latest
+:word_execute
+    &word_lit
+    %0x81C09678
+:code_execute
+    &body_execute
+:body_execute
+    # Pop CFA from data stack and execute the word it points to.
+    # Sets s0 = CFA (so enter can compute the body address as s0+4).
+    RD_SP RS1_SP !-4 ADDI
+    RD_S0 RS1_SP LWU
+    RD_T0 RS1_S0 LWU
+    RS1_T0 JALR
 
 <
 :here
