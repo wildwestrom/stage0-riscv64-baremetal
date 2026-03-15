@@ -72,6 +72,11 @@ Important details:
 - If the session is stale or wedged, run `just debug_cmd stop` and start again.
 - The harness currently uses QEMU's GDB stub on localhost TCP internally. In restricted sandboxes that block local sockets, the start command can fail even though it works in a normal local shell.
 
+## Annotated Hex
+
+Use `just annotate_hex0` to generate a heavily annotated version of hex machine code.
+This validates that the jump and label addresses are correct, and does its best to break down each machine instruction by byte.
+
 ## Plan Maintenance
 
 `PLAN.md` is the living roadmap for this project. Keep it current as you work:

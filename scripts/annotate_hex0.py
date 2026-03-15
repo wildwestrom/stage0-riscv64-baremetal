@@ -47,6 +47,12 @@ INSTRUCTION_RE = re.compile(
     r"^(?P<indent>\s*)(?P<bytes>[0-9A-Fa-f]{2}(?:\s+[0-9A-Fa-f]{2}){3})(?P<trailing>\s*(?:[#;].*)?)$"
 )
 LABEL_RE = re.compile(r"^(?P<indent>\s*#\s*[^#;]+:)\s*$")
+# Matches labels that already carry an address annotation: # name: (0xADDR)
+ANNOTATED_LABEL_RE = re.compile(
+    r"^(?P<indent>\s*)#\s*[^#;(]+:\s*\(0x(?P<addr>[0-9A-Fa-f]+)\)\s*$"
+)
+# Extracts the last (0xADDR) hint from an instruction's trailing comment
+TRAILING_ADDR_RE = re.compile(r"\(0x([0-9A-Fa-f]+)\)\s*$")
 
 
 def sign_extend(value: int, bits: int) -> int:
@@ -234,6 +240,7 @@ def decode_b(word: int, address: int, opcode: int) -> dict[str, object]:
     }.get(funct3, "branch-unknown")
     return {
         "type": "B",
+        "target": target,
         "fields": [
             f"imm[12]=0b{imm12:b}",
             f"imm[10:5]=0b{imm10_5:06b}",
@@ -259,6 +266,7 @@ def decode_j(word: int, address: int, opcode: int) -> dict[str, object]:
     target = (address + immediate) & 0xFFFFFFFF
     return {
         "type": "J",
+        "target": target,
         "fields": [
             f"imm[20]=0b{imm20:b}",
             f"imm[10:1]=0b{imm10_1:010b}",
@@ -352,7 +360,7 @@ def annotate_instruction(line: str, address: int) -> list[str]:
     ]
 
 
-def annotate_lines(lines: list[str], source_name: str) -> list[str]:
+def annotate_lines(lines: list[str], source_name: str) -> tuple[list[str], int]:
     decoded_instructions: list[tuple[int, int, str, dict[str, object]]] = []
     address = 0
     for index, line in enumerate(lines):
@@ -364,6 +372,14 @@ def annotate_lines(lines: list[str], source_name: str) -> list[str]:
             )
             decoded_instructions.append((index, address, instruction_match.group("indent"), decode_instruction(word, address)))
             address += 4
+
+    # Build index → decoded dict for O(1) lookup during validation
+    decoded_by_line: dict[int, dict[str, object]] = {
+        idx: dec for idx, _addr, _ind, dec in decoded_instructions
+    }
+    decoded_addr_by_line: dict[int, int] = {
+        idx: addr for idx, addr, _ind, _dec in decoded_instructions
+    }
 
     pair_notes: dict[int, str] = {}
     for current, following in zip(decoded_instructions, decoded_instructions[1:]):
@@ -380,12 +396,15 @@ def annotate_lines(lines: list[str], source_name: str) -> list[str]:
 
     output: list[str] = []
     inserted_banner = False
+    error_count = 0
     address = 0
     for index, line in enumerate(lines):
         if not inserted_banner and line.startswith("# hex0 -"):
             output.append(line)
-            output.append("# This file is generated from baremetal/hex0_source.hex0.")
+            output.append("")
+            output.append("# This file is generated from baremetal/hex0.hex0.")
             output.append("# Regenerate it with: just annotate_hex0")
+            output.append("")
             inserted_banner = True
             continue
         label_match = LABEL_RE.match(line)
@@ -394,17 +413,46 @@ def annotate_lines(lines: list[str], source_name: str) -> list[str]:
             continue
         instruction_match = INSTRUCTION_RE.match(line)
         if instruction_match is not None:
+            # Validate trailing address hint for branches and jumps
+            trailing = instruction_match.group("trailing")
+            if trailing:
+                hint_match = TRAILING_ADDR_RE.search(trailing)
+                if hint_match:
+                    hint_addr = int(hint_match.group(1), 16)
+                    dec = decoded_by_line.get(index, {})
+                    if dec.get("type") in ("B", "J") and "target" in dec:
+                        actual: int = int(dec["target"])  # type: ignore[arg-type]
+                        if actual != hint_addr:
+                            msg = (
+                                f"# TARGET MISMATCH at 0x{decoded_addr_by_line[index]:04X}: "
+                                f"comment says 0x{hint_addr:X} but instruction encodes 0x{actual:X}"
+                            )
+                            output.append(f"{instruction_match.group('indent')}{msg}")
+                            print(msg.lstrip("# "), file=sys.stderr)
+                            error_count += 1
             if index in pair_notes:
                 output.append(pair_notes[index])
             output.extend(annotate_instruction(line, address))
             output.append("")
             address += 4
             continue
+        # Validate annotated label address
+        alabel_match = ANNOTATED_LABEL_RE.match(line)
+        if alabel_match is not None:
+            claimed = int(alabel_match.group("addr"), 16)
+            if claimed != address:
+                msg = (
+                    f"# ADDR MISMATCH: label claims 0x{claimed:X} "
+                    f"but actual address is 0x{address:X}"
+                )
+                output.append(f"{alabel_match.group('indent')}{msg}")
+                print(msg.lstrip("# "), file=sys.stderr)
+                error_count += 1
         output.append(line)
     if not inserted_banner:
         output.insert(0, f"# Generated from {source_name}.")
         output.insert(1, "# Regenerate it with: just annotate_hex0")
-    return output
+    return output, error_count
 
 
 def parse_args() -> argparse.Namespace:
@@ -417,8 +465,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     source_lines = args.source.read_text(encoding="utf-8").splitlines()
-    annotated = annotate_lines(source_lines, str(args.source))
+    annotated, error_count = annotate_lines(source_lines, str(args.source))
     args.output.write_text("\n".join(annotated) + "\n", encoding="utf-8")
+    if error_count:
+        print(f"{error_count} validation error(s) found.", file=sys.stderr)
+        return 1
     return 0
 
 
