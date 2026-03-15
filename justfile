@@ -8,7 +8,6 @@ hex0_c := "baremetal/high_level_prototype/stage0_monitor.c"
 hex0_ld := "baremetal/high_level_prototype/stage0_monitor.ld"
 m0_hex2 := "baremetal/M0.hex2"
 derzforth_src := "baremetal/GAS/derzforth.s"
-derzforth_m1_src := "baremetal/derzforth.M1"
 derzforth_elf := "build/derzforth.elf"
 derzforth_debug_elf := "build/derzforth.debug.elf"
 asflags := "-march=rv64i -mabi=lp64"
@@ -43,7 +42,7 @@ test_full_chain_lisp: hex0_bin
       printf "\x04"; \
       cat {{m0_hex2}}; \
       printf "\x04"; \
-      cat baremetal/riscv64_defs.M1 {{derzforth_m1_src}}; \
+      cat baremetal/riscv64_defs.M1 baremetal/derzforth.M1; \
       printf "\x04"; \
       printf "\n"; \
       cat derzforth/lexicons/prelude.forth; \
