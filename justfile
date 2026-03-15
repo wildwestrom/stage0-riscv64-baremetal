@@ -50,11 +50,11 @@ test_full_chain_lisp: hex0_bin
       cat lexicons/control.forth; \
       printf "\n"; \
       cat lexicons/lisp.forth; \
-      printf "\n"; \
-      cat lexicons/tests/lisp_test.forth; \
+      printf "\nlisp-init\n0x40 emit 10 emit lisp-repl\n"; \
+      cat tests/lisp_test.lisp; \
     ) | timeout "${TIMEOUT_FULL_CHAIN_LISP:-30.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{build_dir}}/hex0.bin > {{build_dir}}/full_chain_lisp.out 2>/dev/null || status=$?; \
-    sed -n "/^test-fixnum$/,\$p" {{build_dir}}/full_chain_lisp.out > {{build_dir}}/full_chain_lisp.actual; \
-    if [[ "$status" -eq 0 ]] && cmp -s {{build_dir}}/full_chain_lisp.actual tests/lisp.expected; then \
+    sed -n "/^@\$/,\${/^@\$/d;p}" {{build_dir}}/full_chain_lisp.out > {{build_dir}}/full_chain_lisp.actual; \
+    if [[ "$status" -eq 0 || "$status" -eq 124 ]] && cmp -s {{build_dir}}/full_chain_lisp.actual tests/lisp.expected; then \
       printf "PASS test_full_chain_lisp\n"; \
     else \
       printf "FAIL test_full_chain_lisp: see %s and %s\n" "{{build_dir}}/full_chain_lisp.out" "{{build_dir}}/full_chain_lisp.actual" >&2; \
@@ -115,29 +115,6 @@ test_control: derzforth_elf
       printf "PASS test_control\n"; \
     else \
       printf "FAIL test_control: see %s and %s\n" "{{build_dir}}/control.out" "{{build_dir}}/control.actual" >&2; \
-      exit 1; \
-    fi \
-  '
-
-test_lisp: derzforth_elf
-  bash -euxo pipefail -c '\
-    mkdir -p {{build_dir}}; \
-    rm -f {{build_dir}}/lisp.stdin {{build_dir}}/lisp.out {{build_dir}}/lisp.actual; \
-    printf "\n" > {{build_dir}}/lisp.stdin; \
-    cat derzforth/lexicons/prelude.forth >> {{build_dir}}/lisp.stdin; \
-    printf "\n" >> {{build_dir}}/lisp.stdin; \
-    cat lexicons/control.forth >> {{build_dir}}/lisp.stdin; \
-    printf "\n" >> {{build_dir}}/lisp.stdin; \
-    cat lexicons/lisp.forth >> {{build_dir}}/lisp.stdin; \
-    printf "\n" >> {{build_dir}}/lisp.stdin; \
-    cat lexicons/tests/lisp_test.forth >> {{build_dir}}/lisp.stdin; \
-    status=0; \
-    timeout "${TIMEOUT_LISP:-10.0s}" qemu-system-riscv64-purecap -nographic -monitor none -serial stdio -machine virt -bios none -kernel {{derzforth_elf}} < {{build_dir}}/lisp.stdin > {{build_dir}}/lisp.out 2>/dev/null || status=$?; \
-    sed -n "/^test-fixnum$/,\$p" {{build_dir}}/lisp.out > {{build_dir}}/lisp.actual; \
-    if [[ "$status" -eq 0 ]] && cmp -s {{build_dir}}/lisp.actual tests/lisp.expected; then \
-      printf "PASS test_lisp\n"; \
-    else \
-      printf "FAIL test_lisp: see %s and %s\n" "{{build_dir}}/lisp.out" "{{build_dir}}/lisp.actual" >&2; \
       exit 1; \
     fi \
   '
