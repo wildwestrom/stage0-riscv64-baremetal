@@ -361,10 +361,51 @@ test-read-nested
  ok
   lisp-init
  ok
-  lisp-read global-env @ eval lisp-print 10 emit ;
+  lisp-read lisp-print 10 emit ;
  ok
 test-repl-quote
-(1 2)
+(quote (1 2))
+ ok
+
+ ok
+
+ ok
+: test-string-literal
+ ok
+  lisp-init
+ ok
+  lisp-read lisp-print 10 emit ;
+ ok
+test-string-literal
+"Hello"
+ ok
+
+ ok
+
+ ok
+: test-string-first-char
+ ok
+  lisp-init
+ ok
+  lisp-read global-env @ eval lisp-print 10 emit ;
+ ok
+test-string-first-char
+72
+ ok
+
+ ok
+
+ ok
+: test-string-rest-chars
+ ok
+  lisp-init
+ ok
+  lisp-read global-env @ eval lisp-print 10 emit ;
+ ok
+test-string-rest-chars
+"ello"
+ ok
+
  ok
 
  ok

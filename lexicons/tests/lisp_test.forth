@@ -181,7 +181,26 @@ test-read-nested
 ((1 2) 3)
 : test-repl-quote
   lisp-init
-  lisp-read global-env @ eval lisp-print 10 emit ;
+  lisp-read lisp-print 10 emit ;
 test-repl-quote
 (quote (1 2))
+
+: test-string-literal
+  lisp-init
+  lisp-read lisp-print 10 emit ;
+test-string-literal
+"Hello"
+
+: test-string-first-char
+  lisp-init
+  lisp-read global-env @ eval lisp-print 10 emit ;
+test-string-first-char
+(first "Hello")
+
+: test-string-rest-chars
+  lisp-init
+  lisp-read global-env @ eval lisp-print 10 emit ;
+test-string-rest-chars
+(rest "Hello")
+
 bye

@@ -63,6 +63,7 @@
 : ch-u ch-t 1 + ;
 : ch-v ch-u 1 + ;
 : ch-x ch-u 3 + ;
+: ch-dquote 0x20 2 + ;   \ ASCII 34 = '"'
 
 \ The Lisp heap lives well above DerzForth's growing dictionary so evaluator
 \ allocations during tests cannot scribble over later word definitions.
@@ -95,6 +96,8 @@
 : make-fixnum  ( n -- value )               1 swap 0 make-cell ;
 : make-symbol  ( hash name -- value )       2 -rot make-cell ;
 : make-closure ( params body-env -- value ) 3 -rot make-cell ;
+: make-string  ( addr -- value )  4 swap 0 make-cell ;
+: string-addr@ ( string -- addr ) field1@ ;
 
 : first        ( pair -- car )   field1@ ;
 : rest         ( pair -- cdr )   field2@ ;
@@ -112,6 +115,7 @@
 : fixnum?   ( value -- flag ) dup nil? if drop 0 exit then tag@ 1 = ;
 : symbol?   ( value -- flag ) dup nil? if drop 0 exit then tag@ 2 = ;
 : closure?  ( value -- flag ) dup nil? if drop 0 exit then tag@ 3 = ;
+: string?   ( value -- flag ) dup nil? if drop 0 exit then tag@ 4 = ;
 : eq?       ( a b -- flag ) = ;
 
 : second ( list -- value ) rest first ;
@@ -327,6 +331,7 @@
   dup nil? if drop print-nil exit then
   dup fixnum? if fixnum>n print-number exit then
   dup symbol? if symbol-name@ print-string exit then
+  dup string? if ch-dquote emit string-addr@ print-string ch-dquote emit exit then
   dup pair? if
     ch-lparen emit
     begin
@@ -346,6 +351,7 @@
 : eval ( expr env -- value )
   over nil? if drop exit then
   over fixnum? if drop exit then
+  over string? if drop exit then
   over symbol? if
     over symbol-hash@ hash-nil = if 2drop 0 exit then
     over symbol-hash@ hash-t = if 2drop lisp-true exit then
@@ -391,6 +397,7 @@
       drop
       2dup swap second swap recurse
       nip nip
+      dup string? if string-addr@ c@ make-fixnum exit then
       first
       exit
     then
@@ -398,6 +405,7 @@
       drop
       2dup swap second swap recurse
       nip nip
+      dup string? if string-addr@ 1+ make-string exit then
       rest
       exit
     then
@@ -543,6 +551,24 @@
   store-and-hash    \ ( name-start hash' )
   read-sym-loop ;
 
+\ Accumulate string characters onto the heap until closing '"'.
+: read-string-chars ( -- )
+  read-char
+  dup ch-dquote = if drop exit then
+  heap-ptr @ c!
+  heap-ptr @ 1+ heap-ptr !
+  recurse ;
+
+\ Read a string literal (opening '"' already consumed). Stores chars on the
+\ heap, null-terminates, aligns, and returns a string cell.
+: read-string ( -- string )
+  heap-ptr @          \ save start address
+  read-string-chars
+  0 heap-ptr @ c!     \ null-terminate
+  heap-ptr @ 1+ heap-ptr !
+  align-heap
+  make-string ;
+
 \ Read an atom (number or symbol) starting from its first character.
 : read-atom ( first-char -- value )
   dup digit? if
@@ -561,6 +587,7 @@
     recurse         \ read the rest of the outer list
     cons exit
   then
+  dup ch-dquote = if drop read-string recurse cons exit then
   read-atom         \ parse atom
   recurse           \ read the rest of the list
   cons ;
@@ -569,6 +596,7 @@
 : lisp-read ( -- val )
   skip-ws
   dup ch-lparen = if drop read-list exit then
+  dup ch-dquote = if drop read-string exit then
   read-atom ;
 
 \ Read-eval-print loop. Loops forever (exit by terminating QEMU).
