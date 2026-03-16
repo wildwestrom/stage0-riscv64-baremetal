@@ -19,7 +19,7 @@
 
 ; Bare metal M0 stage payload
 ; Style adapted to match conventions in `M0_riscv64.hex2` from [github.com/oriansj/stage0-posix-riscv64](https://github.com/oriansj/stage0-posix-riscv64/blob/master/M0_riscv64.hex2)
-; Primary source: baremetal/GAS/M0.s and baremetal/GAS/M0_backend.s
+; Primary source: baremetal/GAS/M0.s
 
 ; Register use:
 ; s1: heap pointer

@@ -14,14 +14,16 @@ c_asmflags := "-Oz -march=rv64i -mabi=lp64 -mcmodel=medany -msmall-data-limit=0 
 ldflags := "-Ttext=0x80000000 -e _start -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none -Wl,--strip-all"
 ldflags_debug := "-Ttext=0x80000000 -e _start -march=rv64i -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none"
 
-hex0_bin:
-  mkdir -p {{build_dir}}
+build_dir:
+	mkdir -p {{build_dir}}
+
+hex0_bin: build_dir
   ./scripts/hex0_to_bin.sh baremetal/hex0.hex0 {{build_dir}}/hex0.bin
 
-annotate_hex0:
+annotate_hex0: build_dir
   python3 scripts/annotate_hex0.py baremetal/hex0.hex0 {{build_dir}}/hex0_annotated.hex0
 
-annotate_hex1:
+annotate_hex1: build_dir
   python3 scripts/annotate_hex0.py baremetal/hex1.hex0 {{build_dir}}/hex1_annotated.hex0
 
 test: hex0_bin
@@ -51,9 +53,13 @@ test: hex0_bin
     fi \
   '
 
-debug_hex0:
+m0_prototype: build_dir
+	{{as}} {{asflags_m0}} baremetal/GAS/M0.s -o {{build_dir}}/M0.o
+	{{cc}} {{ldflags_debug}} {{build_dir}}/M0.o -o {{build_dir}}/M0.elf
+	{{objcopy}} -O binary build/M0.elf build/M0.bin
+
+debug_hex0: build_dir
   bash -euxo pipefail -c '\
-    mkdir -p {{build_dir}}; \
     {{as}} {{asflags}} baremetal/GAS/hex0.s -o {{build_dir}}/hex0.o; \
     {{cc}} {{ldflags_debug}} {{build_dir}}/hex0.o -o {{build_dir}}/hex0.debug.elf; \
     rm -f qemu-dbg.in qemu-dbg.out; \
