@@ -90,6 +90,14 @@ def format_hex(value: int, bits: int = 32) -> str:
     return f"0x{value & ((1 << bits) - 1):X}"
 
 
+def recipe_name_for_source(source_name: str) -> str:
+    source_path = pathlib.Path(source_name)
+    stem = source_path.stem
+    if stem.startswith("hex"):
+        return f"annotate_{stem}"
+    return "annotate_hex0"
+
+
 def decode_u(word: int, _address: int, opcode: int) -> dict[str, object]:
     imm20 = (word >> 12) & 0xFFFFF
     rd = (word >> 7) & 0x1F
@@ -122,6 +130,27 @@ def decode_i(word: int, _address: int, opcode: int) -> dict[str, object]:
             decoded = (
                 f"addi {asm_reg_name(rd)}, {asm_reg_name(rs1)}, {format_signed(imm12)}"
             )
+        elif funct3 == 0b010:
+            mnemonic = "slti"
+            decoded = (
+                f"slti {asm_reg_name(rd)}, {asm_reg_name(rs1)}, {format_signed(imm12)}"
+            )
+        elif funct3 == 0b011:
+            mnemonic = "sltiu"
+            decoded = (
+                f"sltiu {asm_reg_name(rd)}, {asm_reg_name(rs1)}, {format_signed(imm12)}"
+            )
+        elif funct3 == 0b100:
+            mnemonic = "xori"
+            decoded = (
+                f"xori {asm_reg_name(rd)}, {asm_reg_name(rs1)}, {format_signed(imm12)}"
+            )
+            if imm12 == -1:
+                mnemonic = "not"
+                decoded = f"not {asm_reg_name(rd)}, {asm_reg_name(rs1)}"
+        elif funct3 == 0b110:
+            mnemonic = "ori"
+            decoded = f"ori {asm_reg_name(rd)}, {asm_reg_name(rs1)}, 0x{imm12_raw:X}"
         elif funct3 == 0b111:
             mnemonic = "andi"
             decoded = f"andi {asm_reg_name(rd)}, {asm_reg_name(rs1)}, 0x{imm12_raw:X}"
@@ -129,12 +158,34 @@ def decode_i(word: int, _address: int, opcode: int) -> dict[str, object]:
             shamt = (word >> 20) & 0x3F
             mnemonic = "slli"
             decoded = f"slli {asm_reg_name(rd)}, {asm_reg_name(rs1)}, {shamt}"
+        elif funct3 == 0b101:
+            shamt = (word >> 20) & 0x3F
+            shift_funct6 = (word >> 26) & 0x3F
+            if shift_funct6 == 0:
+                mnemonic = "srli"
+                decoded = f"srli {asm_reg_name(rd)}, {asm_reg_name(rs1)}, {shamt}"
+            elif shift_funct6 == 0b010000:
+                mnemonic = "srai"
+                decoded = f"srai {asm_reg_name(rd)}, {asm_reg_name(rs1)}, {shamt}"
     elif opcode == 0x1B:
         if funct3 == 0b000:
             mnemonic = "addiw"
             decoded = (
                 f"addiw {asm_reg_name(rd)}, {asm_reg_name(rs1)}, {format_signed(imm12)}"
             )
+        elif funct3 == 0b001:
+            shamt = (word >> 20) & 0x1F
+            mnemonic = "slliw"
+            decoded = f"slliw {asm_reg_name(rd)}, {asm_reg_name(rs1)}, {shamt}"
+        elif funct3 == 0b101:
+            shamt = (word >> 20) & 0x1F
+            shift_funct7 = (word >> 25) & 0x7F
+            if shift_funct7 == 0:
+                mnemonic = "srliw"
+                decoded = f"srliw {asm_reg_name(rd)}, {asm_reg_name(rs1)}, {shamt}"
+            elif shift_funct7 == 0b0100000:
+                mnemonic = "sraiw"
+                decoded = f"sraiw {asm_reg_name(rd)}, {asm_reg_name(rs1)}, {shamt}"
     elif opcode == 0x03:
         mnemonic = {
             0b000: "lb",
@@ -175,8 +226,35 @@ def decode_r(word: int, opcode: int) -> dict[str, object]:
     funct3 = (word >> 12) & 0x7
     rd = (word >> 7) & 0x1F
     decoded = "r-unknown"
-    if opcode == 0x33 and funct3 == 0b000 and funct7 == 0:
-        decoded = f"add {asm_reg_name(rd)}, {asm_reg_name(rs1)}, {asm_reg_name(rs2)}"
+    if opcode == 0x33:
+        mnemonic = {
+            (0b000, 0b0000000): "add",
+            (0b000, 0b0100000): "sub",
+            (0b001, 0b0000000): "sll",
+            (0b010, 0b0000000): "slt",
+            (0b011, 0b0000000): "sltu",
+            (0b100, 0b0000000): "xor",
+            (0b101, 0b0000000): "srl",
+            (0b101, 0b0100000): "sra",
+            (0b110, 0b0000000): "or",
+            (0b111, 0b0000000): "and",
+        }.get((funct3, funct7))
+        if mnemonic is not None:
+            decoded = (
+                f"{mnemonic} {asm_reg_name(rd)}, {asm_reg_name(rs1)}, {asm_reg_name(rs2)}"
+            )
+    elif opcode == 0x3B:
+        mnemonic = {
+            (0b000, 0b0000000): "addw",
+            (0b000, 0b0100000): "subw",
+            (0b001, 0b0000000): "sllw",
+            (0b101, 0b0000000): "srlw",
+            (0b101, 0b0100000): "sraw",
+        }.get((funct3, funct7))
+        if mnemonic is not None:
+            decoded = (
+                f"{mnemonic} {asm_reg_name(rd)}, {asm_reg_name(rs1)}, {asm_reg_name(rs2)}"
+            )
     return {
         "type": "R",
         "fields": [
@@ -285,7 +363,7 @@ def decode_instruction(word: int, address: int) -> dict[str, object]:
         return decode_u(word, address, opcode)
     if opcode in {0x13, 0x1B, 0x03, 0x67}:
         return decode_i(word, address, opcode)
-    if opcode == 0x33:
+    if opcode in {0x33, 0x3B}:
         return decode_r(word, opcode)
     if opcode == 0x23:
         return decode_s(word, opcode)
@@ -361,6 +439,7 @@ def annotate_instruction(line: str, address: int) -> list[str]:
 
 
 def annotate_lines(lines: list[str], source_name: str) -> tuple[list[str], int]:
+    recipe_name = recipe_name_for_source(source_name)
     decoded_instructions: list[tuple[int, int, str, dict[str, object]]] = []
     address = 0
     for index, line in enumerate(lines):
@@ -402,8 +481,8 @@ def annotate_lines(lines: list[str], source_name: str) -> tuple[list[str], int]:
         if not inserted_banner and line.startswith("# hex0 -"):
             output.append(line)
             output.append("")
-            output.append("# This file is generated from baremetal/hex0.hex0.")
-            output.append("# Regenerate it with: just annotate_hex0")
+            output.append(f"# This file is generated from {source_name}.")
+            output.append(f"# Regenerate it with: just {recipe_name}")
             output.append("")
             inserted_banner = True
             continue
@@ -451,7 +530,7 @@ def annotate_lines(lines: list[str], source_name: str) -> tuple[list[str], int]:
         output.append(line)
     if not inserted_banner:
         output.insert(0, f"# Generated from {source_name}.")
-        output.insert(1, "# Regenerate it with: just annotate_hex0")
+        output.insert(1, f"# Regenerate it with: just {recipe_name}")
     return output, error_count
 
 

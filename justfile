@@ -18,10 +18,11 @@ hex0_bin:
   mkdir -p {{build_dir}}
   ./scripts/hex0_to_bin.sh baremetal/hex0.hex0 {{build_dir}}/hex0.bin
 
-# Optional audit helper: regenerate the deeply annotated view
-# when a particular instruction sequence needs closer inspection.
 annotate_hex0:
   python3 scripts/annotate_hex0.py baremetal/hex0.hex0 {{build_dir}}/hex0_annotated.hex0
+
+annotate_hex1:
+  python3 scripts/annotate_hex0.py baremetal/hex1.hex0 {{build_dir}}/hex1_annotated.hex0
 
 test: hex0_bin
   bash -euxo pipefail -c '\
