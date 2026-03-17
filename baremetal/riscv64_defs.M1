@@ -17,6 +17,12 @@
 
 # Extended from the original M2-Planet definitions to include CHERI extensions.
 
+# Each instruction is composed from
+# - an immediate or label fixup token (`!`, `@`, `$`, `~`) when needed
+# - register field fragments (`RD_*`, `RS1_*`, `RS2_*`)
+# - a base opcode token (`ADDI`, `LB`, `BEQ`, ...)
+# in that order.
+
 DEFINE NULL 0000000000000000
 
 ;; Opcodes

@@ -40,7 +40,7 @@ test: hex0_bin
       printf "\x04"; \
       cat baremetal/M0.hex2; \
       printf "\x04"; \
-      cat uart_echo/echo.M1; \
+      cat baremetal/riscv64_defs.M1 uart_echo/echo.M1; \
       printf "\x04"; \
       printf "test"; \
     ) | timeout "${TIMEOUT_FULL_CHAIN:-5.0s}" {{qemu}} -serial stdio -kernel \

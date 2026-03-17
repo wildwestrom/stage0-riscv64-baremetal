@@ -14,70 +14,53 @@
 ## You should have received a copy of the GNU General Public License
 ## along with stage0.  If not, see <http://www.gnu.org/licenses/>.
 
-# UART Echo program in M0 format
+# UART echo program in M1 format.
 # Chain: M0 -> hex2 -> binary
-#
+
 # This program echoes characters received on UART back to the sender.
 # UART base: 0x10000000, LSR: 0x10000005
+#
+# Concatenate `baremetal/riscv64_defs.M1` just before this file before sending to the assembler.
 
-# RISC-V RV64I instruction definitions
-# Each DEFINE is a complete 4-byte instruction in little-endian hex
-# Format: byte0 byte1 byte2 byte3 (as stored in memory)
+# Audited by Christian Westrom: 2026-03-17, 02:44 UTC
+# My reasoning is that because M2-planet and all its code was
+# hand-written. I can safely say that the opcodes are exactly
+# what they are labeled. I have not verified this myself.
 
-# Stack setup (sp = 0x80002220)
-# Built via: lui 0x40, addiw 1, slli 13, addi 0x220
-DEFINE LUI_SP_0X40       37010400    # lui sp, 0x40
-DEFINE ADDIW_SP_SP_1     1B011100    # addiw sp, sp, 1
-DEFINE SLLI_SP_SP_13     1311D100    # slli sp, sp, 0xD
-DEFINE ADDI_SP_SP_0X220  13010122    # addi sp, sp, 0x220
-
-# UART address setup
-DEFINE LUI_A1_0X10000    B7050010    # lui a1, 0x10000 (UART base)
-DEFINE LUI_A2_0X10000    37060010    # lui a2, 0x10000
-DEFINE ADDIW_A2_A2_5     1B065600    # addiw a2, a2, 5 (a2 = LSR)
-
-# Load byte operations
-DEFINE LB_A0_0_A2        03050600    # lb a0, 0(a2)
-DEFINE LB_A0_0_A1        03850500    # lb a0, 0(a1)
-DEFINE LB_A3_0_A2        83060600    # lb a3, 0(a2)
-
-# Store byte operation
-DEFINE SB_A0_0_A1        2380A500    # sb a0, 0(a1)
-
-# ALU operations
-DEFINE ANDI_A0_A0_1      13751500    # andi a0, a0, 1
-DEFINE ANDI_A3_A3_0X20   93F60602    # andi a3, a3, 0x20
-
-# Branch/jump templates (offset filled in by hex2 via @/$ labels)
-DEFINE BEQ_A0_X0         63000500    # beq a0, x0, <offset>
-DEFINE BEQ_A3_X0         63800600    # beq a3, x0, <offset>
-DEFINE JAL_X0            6F000000    # jal x0, <offset>
-
-
-# Program start
 :_start
-    LUI_SP_0X40
-    ADDIW_SP_SP_1
-    SLLI_SP_SP_13
-    ADDI_SP_SP_0X220
-    LUI_A1_0X10000
-    LUI_A2_0X10000
-    ADDIW_A2_A2_5
+    # Stack setup (sp = 0x80002220)
+    # Built via: lui 0x40, addiw 1, slli 13, addi 0x220
+    ~0x00040000 RD_SP LUI        ; sp = 0x00040000
+    !1 RD_SP RS1_SP ADDIW        ; sp = 0x00040001
+    !13 RD_SP RS1_SP SLLI        ; sp = 0x80002000
+    !0x220 RD_SP RS1_SP ADDI     ; sp = 0x80002220
+
+    # UART address setup
+    ~0x10000000 RD_A1 LUI        ; a1 = UART base
+    ~0x10000000 RD_A2 LUI        ; a2 = UART base
+    !5 RD_A2 RS1_A2 ADDIW        ; a2 = UART LSR
 
 :echo_loop
     # Poll LSR bit 0 (Data Ready)
-    LB_A0_0_A2
-    ANDI_A0_A0_1
-    @echo_loop BEQ_A0_X0
+    RD_A0 RS1_A2 LB              ; lb a0, 0(a2)
+    !1 RD_A0 RS1_A0 ANDI         ; andi a0, a0, 1
+
+		# Try again if not ready
+    @echo_loop RS1_A0 RS2_X0 BEQ ; beq a0, x0, echo_loop
+
     # Data ready, read from RBR
-    LB_A0_0_A1
+    RD_A0 RS1_A1 LB              ; lb a0, 0(a1)
 
 :wait_tx
     # Wait for TX ready (bit 5 of LSR)
-    LB_A3_0_A2
-    ANDI_A3_A3_0X20
-    @wait_tx BEQ_A3_X0
-    # Echo the character
-    SB_A0_0_A1
+    RD_A3 RS1_A2 LB              ; lb a3, 0(a2)
+    !0x20 RD_A3 RS1_A3 ANDI      ; andi a3, a3, 0x20
+
+		# Not ready, try again
+    @wait_tx RS1_A3 RS2_X0 BEQ   ; beq a3, x0, wait_tx
+
+    # Ready: Echo the character
+    RS1_A1 RS2_A0 SB             ; sb a0, 0(a1)
+
     # Loop forever
-    $echo_loop JAL_X0
+    $echo_loop RD_X0 JAL         ; jal x0, echo_loop
