@@ -17,11 +17,7 @@
  */
 
 #include <stdint.h>
-
-#define UART_BASE 0x10000000u
-#define UART_LSR UART_BASE + 5u
-#define UART_LSR_DATA_READY 0x01u
-#define UART_LSR_THR_EMPTY 0x20u
+#include "uart.h"
 
 #define CODE_BUFFER_MAX 0x1000u
 
@@ -41,13 +37,6 @@ __asm__(".section .bss\n"
 
 extern uint8_t code_buffer[];
 extern uint8_t stack_top;
-
-static inline uint8_t uart_read(void) {
-  volatile uint8_t *lsr = (volatile uint8_t *)UART_LSR;
-  while (0 == (*lsr & UART_LSR_DATA_READY)) {
-  }
-  return *(volatile uint8_t *)UART_BASE;
-}
 
 static void line_comment(void) {
   int c = uart_read();
