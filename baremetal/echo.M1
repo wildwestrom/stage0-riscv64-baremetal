@@ -28,13 +28,6 @@
 # what they are labeled. I have not verified this myself.
 
 :_start
-    # Set up stack (sp = 0x80002220)
-    # Built via: lui 0x40, addiw 1, slli 13, addi 0x220
-    ~0x00040000 RD_SP LUI        ; sp = 0x00040000
-    !1 RD_SP RS1_SP ADDIW        ; sp = 0x00040001
-    !13 RD_SP RS1_SP SLLI        ; sp = 0x80002000
-    !0x220 RD_SP RS1_SP ADDI     ; sp = 0x80002220
-
     # UART address setup
     ~0x10000000 RD_A1 LUI        ; a1 = UART base
     # LSR offset

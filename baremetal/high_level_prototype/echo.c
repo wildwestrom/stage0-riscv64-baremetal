@@ -1,4 +1,4 @@
-#include "../baremetal/high_level_prototype/uart.h"
+#include "uart.h"
 
 void _start(void) {
     while (1) {
