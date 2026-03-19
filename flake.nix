@@ -45,6 +45,7 @@
             clang-tools
             just
             pkgs.unixtools.xxd
+            markdownlint-cli2
           ];
         };
       }

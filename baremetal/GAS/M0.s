@@ -426,7 +426,9 @@ Set_Expression_Loop:
     ld a0, 16(a3)  # I->TEXT
     jal ra, match  # Check for match
     bne a0, zero, Set_Expression_Next  # Check next if does not match
-    sd a2, 24(a3)  # I->EXPRESSION = EXP
+    addi a0, a2, 0  # Prepare candidate expression
+    jal ra, Normalize_Expression  # Precompute prefixed numeric substitutions
+    sd a0, 24(a3)  # I->EXPRESSION = normalized EXP
 
 Set_Expression_Next:
     ld a3, 0(a3)  # I = I->NEXT
@@ -436,6 +438,48 @@ Set_Expression_Next:
     ld a1, 16(sp)  # restore a1
     ld a2, 24(sp)  # restore a2
     ld a3, 32(sp)  # restore a3
+    addi sp, sp, 40  # deallocate stack
+    jalr zero, 0(ra)  # return
+
+Normalize_Expression:
+    addi sp, sp, -40  # allocate stack
+    sd ra, 0(sp)  # protect ra
+    sd a1, 8(sp)  # protect a1
+    sd a2, 16(sp)  # protect a2
+    sd a3, 24(sp)  # protect a3
+    sd a4, 32(sp)  # protect a4
+    addi a3, a0, 0  # Preserve original expression
+    lbu a1, 0(a0)  # expression[0]
+    addi t0, zero, 33  # '!'
+    beq a1, t0, Normalize_Expression_Check  # I-immediate candidate
+    addi t0, zero, 64  # '@'
+    beq a1, t0, Normalize_Expression_Check  # B-immediate candidate
+    addi t0, zero, 126  # '~'
+    beq a1, t0, Normalize_Expression_Check  # U-immediate candidate
+    addi t0, zero, 37  # '%'
+    bne a1, t0, Normalize_Expression_Done  # Ignore other macro expansions
+
+Normalize_Expression_Check:
+    addi a0, a0, 1  # Skip prefix before parsing
+    lbu a2, 0(a0)  # First byte after prefix
+    jal ra, numerate_string  # Try parsing numeric payload
+    bne a0, zero, Normalize_Expression_Express  # Non-zero parse result means numeric
+    addi t0, zero, 48  # '0'
+    bne a2, t0, Normalize_Expression_Restore  # Reject symbolic targets
+
+Normalize_Expression_Express:
+    jal ra, express_number  # Convert prefixed numeric into backend hex
+    jal zero, Normalize_Expression_Done  # return generated string
+
+Normalize_Expression_Restore:
+    addi a0, a3, 0  # Return original symbolic expression
+
+Normalize_Expression_Done:
+    ld ra, 0(sp)  # restore ra
+    ld a1, 8(sp)  # restore a1
+    ld a2, 16(sp)  # restore a2
+    ld a3, 24(sp)  # restore a3
+    ld a4, 32(sp)  # restore a4
     addi sp, sp, 40  # deallocate stack
     jalr zero, 0(ra)  # return
 

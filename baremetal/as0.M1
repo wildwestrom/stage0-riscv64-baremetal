@@ -1,0 +1,3980 @@
+## Copyright (C) 2026 Christian Westrom
+## This file is part of stage0.
+##
+## stage0 is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## stage0 is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with stage0.  If not, see <http://www.gnu.org/licenses/>.
+
+# Self-hosting assembler payload for M0.
+# Source of truth for the bootstrap path; `baremetal/GAS/as0.s` is kept as
+# a reference listing input with matching intent comments.
+#
+# Concatenate `baremetal/riscv64_defs.M1` immediately before this file before
+# sending it to M0.
+
+DEFINE WORK_BASE 0x80100000
+DEFINE SOURCE_BASE 0x80200000
+DEFINE SOURCE_MAX 0x20000
+DEFINE STACK_TOP 0x80500000
+DEFINE UART_BASE 0x10000000
+DEFINE UART_LSR 0x10000005
+DEFINE UART_LSR_DATA_READY 0x1
+DEFINE UART_LSR_THR_EMPTY 0x20
+DEFINE TEST_FINISHER_BASE 0x100000
+DEFINE TEST_FINISHER_PASS 0x5555
+DEFINE TEST_FINISHER_FAIL 0x3333
+DEFINE LABEL_COUNT_PTR 0x80100000
+DEFINE DEFINE_COUNT_PTR 0x80100004
+DEFINE FAIL_LINE_PTR 0x80100008
+DEFINE FAIL_PHASE_PTR 0x8010000C
+DEFINE FAIL_STAGE_PTR 0x80100010
+DEFINE LABELS_BASE 0x80100100
+DEFINE DEFINES_BASE 0x80109000
+DEFINE LINE_BASE 0x8010C000
+DEFINE TOKEN_PTRS_BASE 0x8010C100
+DEFINE LABEL_MAX 0x200
+DEFINE LABEL_NAME_MAX 0x40
+DEFINE LABEL_ENTRY_SIZE 0x44
+DEFINE DEFINE_MAX 0x80
+DEFINE DEFINE_ENTRY_SIZE 0x48
+DEFINE LINE_MAX 0x100
+DEFINE TOKEN_MAX 0x6
+DEFINE RV_MATCH_ADD 0x33
+DEFINE RV_MATCH_ADDI 0x13
+DEFINE RV_MATCH_ANDI 0x7013
+DEFINE RV_MATCH_AND 0x7033
+DEFINE RV_MATCH_AUIPC 0x17
+DEFINE RV_MATCH_BGE 0x5063
+DEFINE RV_MATCH_BGEU 0x7063
+DEFINE RV_MATCH_BLT 0x4063
+DEFINE RV_MATCH_BLTU 0x6063
+DEFINE RV_MATCH_BEQ 0x63
+DEFINE RV_MATCH_BNE 0x1063
+DEFINE RV_MATCH_EBREAK 0x100073
+DEFINE RV_MATCH_ECALL 0x73
+DEFINE RV_MATCH_FENCE 0xFF0000F
+DEFINE RV_MATCH_FENCE_I 0x100F
+DEFINE RV_MATCH_JAL 0x6F
+DEFINE RV_MATCH_JALR 0x67
+DEFINE RV_MATCH_LBU 0x4003
+DEFINE RV_MATCH_LD 0x3003
+DEFINE RV_MATCH_LUI 0x37
+DEFINE RV_MATCH_LW 0x2003
+DEFINE RV_MATCH_LWU 0x6003
+DEFINE RV_MATCH_MUL 0x2000033
+DEFINE RV_MATCH_OR 0x6033
+DEFINE RV_MATCH_SB 0x23
+DEFINE RV_MATCH_SD 0x3023
+DEFINE RV_MATCH_SLLI 0x1013
+DEFINE RV_MATCH_SLT 0x2033
+DEFINE RV_MATCH_SLTIU 0x3013
+DEFINE RV_MATCH_SLTU 0x3033
+DEFINE RV_MATCH_SRLI 0x5013
+DEFINE RV_MATCH_SUB 0x40000033
+DEFINE RV_MATCH_SUBW 0x4000003B
+DEFINE RV_MATCH_SW 0x2023
+DEFINE RV_MATCH_XOR 0x4033
+DEFINE RV_MATCH_XORI 0x4013
+:_start
+    ~stack_top_addr RD_T0 AUIPC  # addr stack_top_addr -> t0
+    !stack_top_addr RD_T0 RS1_T0 ADDI
+    RD_SP RS1_T0 LD  # u64 0(t0) -> sp
+    ~read_source_from_uart RD_RA AUIPC  # call read_source_from_uart
+    !read_source_from_uart RD_RA RS1_RA JALR
+    @.Lboot_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lboot_fail
+    !-64 RD_SP RS1_SP ADDI  # sp += -64
+    ~str_as0 RD_T0 AUIPC  # addr str_as0 -> t0
+    !str_as0 RD_T0 RS1_T0 ADDI
+    RS1_SP RS2_T0 SD  # u64 t0 -> 0(sp)
+    ~source_base_addr RD_T0 AUIPC  # addr source_base_addr -> t0
+    !source_base_addr RD_T0 RS1_T0 ADDI
+    RD_T0 RS1_T0 LD  # u64 0(t0) -> t0
+    @8 RS1_SP RS2_T0 SD  # u64 t0 -> 8(sp)
+    ~raw_sink_begin_program RD_T0 AUIPC  # addr raw_sink_begin_program -> t0
+    !raw_sink_begin_program RD_T0 RS1_T0 ADDI
+    @0x10 RS1_SP RS2_T0 SD  # u64 t0 -> 16(sp)
+    ~raw_sink_write_byte RD_T0 AUIPC  # addr raw_sink_write_byte -> t0
+    !raw_sink_write_byte RD_T0 RS1_T0 ADDI
+    @0x18 RS1_SP RS2_T0 SD  # u64 t0 -> 24(sp)
+    ~raw_sink_end_program RD_T0 AUIPC  # addr raw_sink_end_program -> t0
+    !raw_sink_end_program RD_T0 RS1_T0 ADDI
+    @0x20 RS1_SP RS2_T0 SD  # u64 t0 -> 32(sp)
+    @0x28 RS1_SP RS2_X0 SD  # u64 zero -> 40(sp)
+    @0x30 RS1_SP RS2_X0 SW  # u32 zero -> 48(sp)
+    @0x34 RS1_SP RS2_X0 SW  # u32 zero -> 52(sp)
+    @0x38 RS1_SP RS2_X0 SW  # u32 zero -> 56(sp)
+    RD_A0 RS1_SP MV  # sp -> a0
+    !0x10 RD_A1 RS1_SP ADDI  # sp + 16 -> a1
+    !0x30 RD_A2 RS1_SP ADDI  # sp + 48 -> a2
+    ~compile_as0_program RD_RA AUIPC  # call compile_as0_program
+    !compile_as0_program RD_RA RS1_RA JALR
+    @.Lboot_fail_after_frame RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lboot_fail_after_frame
+    !0x40 RD_SP RS1_SP ADDI  # sp += 64
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+    $system_exit RD_X0 JAL  # goto system_exit
+:.Lboot_fail_after_frame
+    !0x40 RD_SP RS1_SP ADDI  # sp += 64
+:.Lboot_fail
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $system_exit RD_X0 JAL  # goto system_exit
+:raw_sink_begin_program
+    RETURN  # return
+:raw_sink_write_byte
+    ~0x10000005 RD_T0 LUI  # UART_LSR -> t0
+    !0x10000005 RD_T0 RS1_T0 ADDIW
+:.Lraw_sink_write_wait
+    RD_T1 RS1_T0 LBU  # u8 0(t0) -> t1
+    !0x20 RD_T1 RS1_T1 ANDI  # t1 & UART_LSR_THR_EMPTY -> t1
+    @.Lraw_sink_write_wait RS1_T1 RS2_X0 BEQ  # if t1 == zero goto .Lraw_sink_write_wait
+    ~0x10000000 RD_T0 LUI  # UART_BASE -> t0
+    !0x10000000 RD_T0 RS1_T0 ADDIW
+    RS1_T0 RS2_A1 SB  # u8 a1 -> 0(t0)
+    RETURN  # return
+:raw_sink_end_program
+    RETURN  # return
+:read_source_from_uart
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    @0x10 RS1_SP RS2_S0 SD  # u64 s0 -> 16(sp)
+    @8 RS1_SP RS2_S1 SD  # u64 s1 -> 8(sp)
+    RS1_SP RS2_S2 SD  # u64 s2 -> 0(sp)
+    ~source_base_addr RD_S0 AUIPC  # addr source_base_addr -> s0
+    !source_base_addr RD_S0 RS1_S0 ADDI
+    RD_S0 RS1_S0 LD  # u64 0(s0) -> s0
+    ~0x1FFFF RD_S1 LUI  # SOURCE_MAX - 1 -> s1
+    !0x1FFFF RD_S1 RS1_S1 ADDIW
+    RD_S2 RS1_X0 ADDI  # 0 -> s2
+:.Lread_source_loop
+    ~uart_read RD_RA AUIPC  # call uart_read
+    !uart_read RD_RA RS1_RA JALR
+    !4 RD_T3 RS1_X0 ADDI  # 4 -> t3
+    @.Lread_source_done RS1_A0 RS2_T3 BEQ  # if a0 == t3 goto .Lread_source_done
+    @.Lread_source_fail RS1_S2 RS2_S1 BGEU  # if s2 >=u s1 goto .Lread_source_fail
+    RS1_S0 RS2_A0 SB  # u8 a0 -> 0(s0)
+    !1 RD_S0 RS1_S0 ADDI  # s0 + 1 -> s0
+    !1 RD_S2 RS1_S2 ADDI  # s2 + 1 -> s2
+    $.Lread_source_loop RD_X0 JAL  # goto .Lread_source_loop
+:.Lread_source_done
+    RS1_S0 RS2_X0 SB  # u8 zero -> 0(s0)
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $.Lread_source_return RD_X0 JAL  # goto .Lread_source_return
+:.Lread_source_fail
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+:.Lread_source_return
+    RD_S2 RS1_SP LD  # u64 0(sp) -> s2
+    !8 RD_S1 RS1_SP LD  # u64 8(sp) -> s1
+    !0x10 RD_S0 RS1_SP LD  # u64 16(sp) -> s0
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:uart_read
+    ~0x10000005 RD_T0 LUI  # UART_LSR -> t0
+    !0x10000005 RD_T0 RS1_T0 ADDIW
+:.Luart_read_wait
+    RD_T1 RS1_T0 LBU  # u8 0(t0) -> t1
+    !1 RD_T1 RS1_T1 ANDI  # t1 & UART_LSR_DATA_READY -> t1
+    @.Luart_read_wait RS1_T1 RS2_X0 BEQ  # if t1 == zero goto .Luart_read_wait
+    ~0x10000000 RD_T0 LUI  # UART_BASE -> t0
+    !0x10000000 RD_T0 RS1_T0 ADDIW
+    RD_A0 RS1_T0 LBU  # u8 0(t0) -> a0
+    RETURN  # return
+:system_exit
+    ~0x100000 RD_T0 LUI  # TEST_FINISHER_BASE -> t0
+    !0x100000 RD_T0 RS1_T0 ADDIW
+    @.Lsystem_exit_pass RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lsystem_exit_pass
+    !0x30 RD_A0 RS1_A0 SLLI  # a0 << 48 -> a0
+    !0x30 RD_A0 RS1_A0 SRLI  # a0 >> 48 -> a0
+    @.Lsystem_exit_fail_code_ok RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsystem_exit_fail_code_ok
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+:.Lsystem_exit_fail_code_ok
+    !0x10 RD_A0 RS1_A0 SLLI  # a0 << 16 -> a0
+    ~0x3333 RD_T1 LUI  # TEST_FINISHER_FAIL -> t1
+    !0x3333 RD_T1 RS1_T1 ADDIW
+    RD_A0 RS1_A0 RS2_T1 OR  # a0 | t1 -> a0
+    RS1_T0 RS2_A0 SW  # u32 a0 -> 0(t0)
+:.Lsystem_exit_spin
+    $.Lsystem_exit_spin RD_X0 JAL  # goto .Lsystem_exit_spin
+:.Lsystem_exit_pass
+    ~0x5555 RD_T1 LUI  # TEST_FINISHER_PASS -> t1
+    !0x5555 RD_T1 RS1_T1 ADDIW
+    RS1_T0 RS2_T1 SW  # u32 t1 -> 0(t0)
+    $.Lsystem_exit_spin RD_X0 JAL  # goto .Lsystem_exit_spin
+:compile_as0_program
+    !-80 RD_SP RS1_SP ADDI  # sp += -80
+    @0x48 RS1_SP RS2_RA SD  # u64 ra -> 72(sp)
+    @0x40 RS1_SP RS2_S0 SD  # u64 s0 -> 64(sp)
+    @0x38 RS1_SP RS2_S1 SD  # u64 s1 -> 56(sp)
+    @0x30 RS1_SP RS2_S2 SD  # u64 s2 -> 48(sp)
+    @0x28 RS1_SP RS2_S3 SD  # u64 s3 -> 40(sp)
+    @0x20 RS1_SP RS2_S4 SD  # u64 s4 -> 32(sp)
+    @0x18 RS1_SP RS2_S5 SD  # u64 s5 -> 24(sp)
+    @0x10 RS1_SP RS2_S6 SD  # u64 s6 -> 16(sp)
+    RD_S1 RS1_A1 MV  # a1 -> s1
+    RD_S2 RS1_A2 MV  # a2 -> s2
+    !8 RD_S0 RS1_A0 LD  # u64 8(a0) -> s0
+    @8 RS1_SP RS2_A0 SD  # u64 a0 -> 8(sp)
+    RD_T0 RS1_X0 ADDI  # 0 -> t0
+    ~label_count_addr RD_T1 AUIPC  # addr label_count_addr -> t1
+    !label_count_addr RD_T1 RS1_T1 ADDI
+    RD_T1 RS1_T1 LD  # u64 0(t1) -> t1
+    RS1_T1 RS2_T0 SW  # u32 t0 -> 0(t1)
+    ~define_count_addr RD_T1 AUIPC  # addr define_count_addr -> t1
+    !define_count_addr RD_T1 RS1_T1 ADDI
+    RD_T1 RS1_T1 LD  # u64 0(t1) -> t1
+    RS1_T1 RS2_T0 SW  # u32 t0 -> 0(t1)
+    RS1_S2 RS2_T0 SW  # u32 t0 -> 0(s2)
+    @4 RS1_S2 RS2_T0 SW  # u32 t0 -> 4(s2)
+    @8 RS1_S2 RS2_T0 SW  # u32 t0 -> 8(s2)
+    ~fail_line_addr RD_T1 AUIPC  # addr fail_line_addr -> t1
+    !fail_line_addr RD_T1 RS1_T1 ADDI
+    RD_T1 RS1_T1 LD  # u64 0(t1) -> t1
+    RS1_T1 RS2_X0 SW  # u32 zero -> 0(t1)
+    ~fail_phase_addr RD_T1 AUIPC  # addr fail_phase_addr -> t1
+    !fail_phase_addr RD_T1 RS1_T1 ADDI
+    RD_T1 RS1_T1 LD  # u64 0(t1) -> t1
+    RS1_T1 RS2_X0 SW  # u32 zero -> 0(t1)
+    ~fail_stage_addr RD_T1 AUIPC  # addr fail_stage_addr -> t1
+    !fail_stage_addr RD_T1 RS1_T1 ADDI
+    RD_T1 RS1_T1 LD  # u64 0(t1) -> t1
+    RS1_T1 RS2_X0 SW  # u32 zero -> 0(t1)
+    RD_S3 RS1_X0 ADDI  # 0 -> s3
+:.Lpass1
+    RD_T0 RS1_S0 LBU  # u8 0(s0) -> t0
+    @.Lpass1_done RS1_T0 RS2_X0 BEQ  # if t0 == zero goto .Lpass1_done
+    ~fail_line_addr RD_T1 AUIPC  # addr fail_line_addr -> t1
+    !fail_line_addr RD_T1 RS1_T1 ADDI
+    RD_T1 RS1_T1 LD  # u64 0(t1) -> t1
+    RD_T0 RS1_T1 LW  # i32 0(t1) -> t0
+    !1 RD_T0 RS1_T0 ADDI  # t0 + 1 -> t0
+    RS1_T1 RS2_T0 SW  # u32 t0 -> 0(t1)
+    ~fail_phase_addr RD_T1 AUIPC  # addr fail_phase_addr -> t1
+    !fail_phase_addr RD_T1 RS1_T1 ADDI
+    RD_T1 RS1_T1 LD  # u64 0(t1) -> t1
+    !1 RD_T0 RS1_X0 ADDI  # 1 -> t0
+    RS1_T1 RS2_T0 SW  # u32 t0 -> 0(t1)
+    ~fail_stage_addr RD_T1 AUIPC  # addr fail_stage_addr -> t1
+    !fail_stage_addr RD_T1 RS1_T1 ADDI
+    RD_T1 RS1_T1 LD  # u64 0(t1) -> t1
+    !1 RD_T0 RS1_X0 ADDI  # 1 -> t0
+    RS1_T1 RS2_T0 SW  # u32 t0 -> 0(t1)
+    RD_A0 RS1_S0 MV  # s0 -> a0
+    ~read_line RD_RA AUIPC  # call read_line
+    !read_line RD_RA RS1_RA JALR
+    @.Lfail RS1_A1 RS2_X0 BEQ  # if a1 == zero goto .Lfail
+    RD_S0 RS1_A0 MV  # a0 -> s0
+    ~fail_stage_addr RD_T1 AUIPC  # addr fail_stage_addr -> t1
+    !fail_stage_addr RD_T1 RS1_T1 ADDI
+    RD_T1 RS1_T1 LD  # u64 0(t1) -> t1
+    !2 RD_T0 RS1_X0 ADDI  # 2 -> t0
+    RS1_T1 RS2_T0 SW  # u32 t0 -> 0(t1)
+    ~tokenize_line RD_RA AUIPC  # call tokenize_line
+    !tokenize_line RD_RA RS1_RA JALR
+    @.Lfail RS1_A0 RS2_X0 BLT  # if a0 < zero goto .Lfail
+    @.Lpass1 RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lpass1
+    RD_S4 RS1_A0 MV  # a0 -> s4
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    RD_S5 RS1_A0 MV  # a0 -> s5
+    ~split_label RD_RA AUIPC  # call split_label
+    !split_label RD_RA RS1_RA JALR
+    @.Lpass1_not_label RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lpass1_not_label
+    ~fail_stage_addr RD_T1 AUIPC  # addr fail_stage_addr -> t1
+    !fail_stage_addr RD_T1 RS1_T1 ADDI
+    RD_T1 RS1_T1 LD  # u64 0(t1) -> t1
+    !3 RD_T0 RS1_X0 ADDI  # 3 -> t0
+    RS1_T1 RS2_T0 SW  # u32 t0 -> 0(t1)
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    RD_A1 RS1_S3 MV  # s3 -> a1
+    ~add_label RD_RA AUIPC  # call add_label
+    !add_label RD_RA RS1_RA JALR
+    @.Lfail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lfail
+    $.Lpass1 RD_X0 JAL  # goto .Lpass1
+:.Lpass1_not_label
+    ~fail_stage_addr RD_T1 AUIPC  # addr fail_stage_addr -> t1
+    !fail_stage_addr RD_T1 RS1_T1 ADDI
+    RD_T1 RS1_T1 LD  # u64 0(t1) -> t1
+    !4 RD_T0 RS1_X0 ADDI  # 4 -> t0
+    RS1_T1 RS2_T0 SW  # u32 t0 -> 0(t1)
+    ~line_size RD_RA AUIPC  # call line_size
+    !line_size RD_RA RS1_RA JALR
+    @.Lfail RS1_A0 RS2_X0 BLT  # if a0 < zero goto .Lfail
+    RD_S3 RS1_S3 RS2_A0 ADD  # s3 + a0 -> s3
+    $.Lpass1 RD_X0 JAL  # goto .Lpass1
+:.Lpass1_done
+    !8 RD_T0 RS1_SP LD  # u64 8(sp) -> t0
+    !8 RD_S0 RS1_T0 LD  # u64 8(t0) -> s0
+    RD_S3 RS1_X0 ADDI  # 0 -> s3
+    ~fail_line_addr RD_T1 AUIPC  # addr fail_line_addr -> t1
+    !fail_line_addr RD_T1 RS1_T1 ADDI
+    RD_T1 RS1_T1 LD  # u64 0(t1) -> t1
+    RS1_T1 RS2_X0 SW  # u32 zero -> 0(t1)
+    ~fail_phase_addr RD_T1 AUIPC  # addr fail_phase_addr -> t1
+    !fail_phase_addr RD_T1 RS1_T1 ADDI
+    RD_T1 RS1_T1 LD  # u64 0(t1) -> t1
+    !2 RD_T0 RS1_X0 ADDI  # 2 -> t0
+    RS1_T1 RS2_T0 SW  # u32 t0 -> 0(t1)
+    ~fail_stage_addr RD_T1 AUIPC  # addr fail_stage_addr -> t1
+    !fail_stage_addr RD_T1 RS1_T1 ADDI
+    RD_T1 RS1_T1 LD  # u64 0(t1) -> t1
+    RS1_T1 RS2_X0 SW  # u32 zero -> 0(t1)
+    RD_A5 RS1_S1 LD  # u64 0(s1) -> a5
+    !8 RD_A0 RS1_SP LD  # u64 8(sp) -> a0
+    RD_A1 RS1_A0 LD  # u64 0(a0) -> a1
+    RD_A0 RS1_S1 MV  # s1 -> a0
+    RD_RA RS1_A5 JALR  # goto *a5
+:.Lpass2
+    RD_T0 RS1_S0 LBU  # u8 0(s0) -> t0
+    @.Lpass2_done RS1_T0 RS2_X0 BEQ  # if t0 == zero goto .Lpass2_done
+    ~fail_line_addr RD_T1 AUIPC  # addr fail_line_addr -> t1
+    !fail_line_addr RD_T1 RS1_T1 ADDI
+    RD_T1 RS1_T1 LD  # u64 0(t1) -> t1
+    RD_T0 RS1_T1 LW  # i32 0(t1) -> t0
+    !1 RD_T0 RS1_T0 ADDI  # t0 + 1 -> t0
+    RS1_T1 RS2_T0 SW  # u32 t0 -> 0(t1)
+    ~fail_stage_addr RD_T1 AUIPC  # addr fail_stage_addr -> t1
+    !fail_stage_addr RD_T1 RS1_T1 ADDI
+    RD_T1 RS1_T1 LD  # u64 0(t1) -> t1
+    !5 RD_T0 RS1_X0 ADDI  # 5 -> t0
+    RS1_T1 RS2_T0 SW  # u32 t0 -> 0(t1)
+    RD_A0 RS1_S0 MV  # s0 -> a0
+    ~read_line RD_RA AUIPC  # call read_line
+    !read_line RD_RA RS1_RA JALR
+    @.Lfail_after_begin RS1_A1 RS2_X0 BEQ  # if a1 == zero goto .Lfail_after_begin
+    RD_S0 RS1_A0 MV  # a0 -> s0
+    ~fail_stage_addr RD_T1 AUIPC  # addr fail_stage_addr -> t1
+    !fail_stage_addr RD_T1 RS1_T1 ADDI
+    RD_T1 RS1_T1 LD  # u64 0(t1) -> t1
+    !6 RD_T0 RS1_X0 ADDI  # 6 -> t0
+    RS1_T1 RS2_T0 SW  # u32 t0 -> 0(t1)
+    ~tokenize_line RD_RA AUIPC  # call tokenize_line
+    !tokenize_line RD_RA RS1_RA JALR
+    @.Lfail_after_begin RS1_A0 RS2_X0 BLT  # if a0 < zero goto .Lfail_after_begin
+    @.Lpass2 RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lpass2
+    RD_S4 RS1_A0 MV  # a0 -> s4
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    RD_S5 RS1_A0 MV  # a0 -> s5
+    ~split_label RD_RA AUIPC  # call split_label
+    !split_label RD_RA RS1_RA JALR
+    @.Lpass2 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lpass2
+    ~fail_stage_addr RD_T1 AUIPC  # addr fail_stage_addr -> t1
+    !fail_stage_addr RD_T1 RS1_T1 ADDI
+    RD_T1 RS1_T1 LD  # u64 0(t1) -> t1
+    !7 RD_T0 RS1_X0 ADDI  # 7 -> t0
+    RS1_T1 RS2_T0 SW  # u32 t0 -> 0(t1)
+    ~emit_line RD_RA AUIPC  # call emit_line
+    !emit_line RD_RA RS1_RA JALR
+    @.Lfail_after_begin RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lfail_after_begin
+    $.Lpass2 RD_X0 JAL  # goto .Lpass2
+:.Lpass2_done
+    @4 RS1_S2 RS2_S3 SW  # u32 s3 -> 4(s2)
+    !2 RD_T0 RS1_S3 SRLI  # s3 >> 2 -> t0
+    RS1_S2 RS2_T0 SW  # u32 t0 -> 0(s2)
+    @8 RS1_S2 RS2_X0 SW  # u32 zero -> 8(s2)
+    !0x10 RD_A5 RS1_S1 LD  # u64 16(s1) -> a5
+    !8 RD_T0 RS1_SP LD  # u64 8(sp) -> t0
+    RD_A1 RS1_T0 LD  # u64 0(t0) -> a1
+    RD_A0 RS1_S1 MV  # s1 -> a0
+    RD_A2 RS1_S2 MV  # s2 -> a2
+    RD_RA RS1_A5 JALR  # goto *a5
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $.Ldone RD_X0 JAL  # goto .Ldone
+:.Lfail_after_begin
+    ~debug_fail RD_RA AUIPC  # call debug_fail
+    !debug_fail RD_RA RS1_RA JALR
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+    $.Ldone RD_X0 JAL  # goto .Ldone
+:.Lfail
+    ~debug_fail RD_RA AUIPC  # call debug_fail
+    !debug_fail RD_RA RS1_RA JALR
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+:.Ldone
+    !0x48 RD_RA RS1_SP LD  # u64 72(sp) -> ra
+    !0x40 RD_S0 RS1_SP LD  # u64 64(sp) -> s0
+    !0x38 RD_S1 RS1_SP LD  # u64 56(sp) -> s1
+    !0x30 RD_S2 RS1_SP LD  # u64 48(sp) -> s2
+    !0x28 RD_S3 RS1_SP LD  # u64 40(sp) -> s3
+    !0x20 RD_S4 RS1_SP LD  # u64 32(sp) -> s4
+    !0x18 RD_S5 RS1_SP LD  # u64 24(sp) -> s5
+    !0x10 RD_S6 RS1_SP LD  # u64 16(sp) -> s6
+    !0x50 RD_SP RS1_SP ADDI  # sp += 80
+    RETURN  # return
+:debug_fail
+    !-16 RD_SP RS1_SP ADDI  # sp += -16
+    @8 RS1_SP RS2_RA SD  # u64 ra -> 8(sp)
+    !8 RD_A5 RS1_S1 LD  # u64 8(s1) -> a5
+    RD_A0 RS1_S1 MV  # s1 -> a0
+    !0x46 RD_A1 RS1_X0 ADDI  # 'F' -> a1
+    RD_RA RS1_A5 JALR  # goto *a5
+    !8 RD_A5 RS1_S1 LD  # u64 8(s1) -> a5
+    RD_A0 RS1_S1 MV  # s1 -> a0
+    ~fail_phase_addr RD_T0 AUIPC  # addr fail_phase_addr -> t0
+    !fail_phase_addr RD_T0 RS1_T0 ADDI
+    RD_T0 RS1_T0 LD  # u64 0(t0) -> t0
+    RD_T0 RS1_T0 LW  # i32 0(t0) -> t0
+    !0x30 RD_A1 RS1_T0 ADDI  # t0 + '0' -> a1
+    RD_RA RS1_A5 JALR  # goto *a5
+    !8 RD_A5 RS1_S1 LD  # u64 8(s1) -> a5
+    RD_A0 RS1_S1 MV  # s1 -> a0
+    ~fail_stage_addr RD_T0 AUIPC  # addr fail_stage_addr -> t0
+    !fail_stage_addr RD_T0 RS1_T0 ADDI
+    RD_T0 RS1_T0 LD  # u64 0(t0) -> t0
+    RD_T0 RS1_T0 LW  # i32 0(t0) -> t0
+    !0x30 RD_A1 RS1_T0 ADDI  # t0 + '0' -> a1
+    RD_RA RS1_A5 JALR  # goto *a5
+    !8 RD_A5 RS1_S1 LD  # u64 8(s1) -> a5
+    RD_A0 RS1_S1 MV  # s1 -> a0
+    ~fail_line_addr RD_A1 AUIPC  # addr fail_line_addr -> a1
+    !fail_line_addr RD_A1 RS1_A1 ADDI
+    RD_A1 RS1_A1 LD  # u64 0(a1) -> a1
+    RD_A1 RS1_A1 LW  # i32 0(a1) -> a1
+    !0xFF RD_A1 RS1_A1 ANDI  # a1 & 0xff -> a1
+    RD_RA RS1_A5 JALR  # goto *a5
+    !8 RD_A5 RS1_S1 LD  # u64 8(s1) -> a5
+    RD_A0 RS1_S1 MV  # s1 -> a0
+    ~fail_line_addr RD_A1 AUIPC  # addr fail_line_addr -> a1
+    !fail_line_addr RD_A1 RS1_A1 ADDI
+    RD_A1 RS1_A1 LD  # u64 0(a1) -> a1
+    RD_A1 RS1_A1 LW  # i32 0(a1) -> a1
+    !8 RD_A1 RS1_A1 SRLI  # a1 >> 8 -> a1
+    !0xFF RD_A1 RS1_A1 ANDI  # a1 & 0xff -> a1
+    RD_RA RS1_A5 JALR  # goto *a5
+    !8 RD_RA RS1_SP LD  # u64 8(sp) -> ra
+    !0x10 RD_SP RS1_SP ADDI  # sp += 16
+    RETURN  # return
+:read_line
+    ~line_addr RD_T0 AUIPC  # addr line_addr -> t0
+    !line_addr RD_T0 RS1_T0 ADDI
+    RD_T0 RS1_T0 LD  # u64 0(t0) -> t0
+    RD_T1 RS1_X0 ADDI  # 0 -> t1
+:.Lread_line_loop
+    RD_T2 RS1_A0 LBU  # u8 0(a0) -> t2
+    @.Lread_line_end RS1_T2 RS2_X0 BEQ  # if t2 == zero goto .Lread_line_end
+    !0xA RD_T3 RS1_X0 ADDI  # 10 -> t3
+    @.Lread_line_nl RS1_T2 RS2_T3 BEQ  # if t2 == t3 goto .Lread_line_nl
+    !0xFF RD_T3 RS1_X0 ADDI  # LINE_MAX - 1 -> t3
+    @.Lread_line_fail RS1_T1 RS2_T3 BGEU  # if t1 >=u t3 goto .Lread_line_fail
+    RS1_T0 RS2_T2 SB  # u8 t2 -> 0(t0)
+    !1 RD_T0 RS1_T0 ADDI  # t0 + 1 -> t0
+    !1 RD_A0 RS1_A0 ADDI  # a0 + 1 -> a0
+    !1 RD_T1 RS1_T1 ADDI  # t1 + 1 -> t1
+    $.Lread_line_loop RD_X0 JAL  # goto .Lread_line_loop
+:.Lread_line_nl
+    !1 RD_A0 RS1_A0 ADDI  # a0 + 1 -> a0
+:.Lread_line_end
+    RS1_T0 RS2_X0 SB  # u8 zero -> 0(t0)
+    !1 RD_A1 RS1_X0 ADDI  # 1 -> a1
+    RETURN  # return
+:.Lread_line_fail
+    RD_A1 RS1_X0 ADDI  # 0 -> a1
+    RETURN  # return
+:tokenize_line
+    ~line_addr RD_T0 AUIPC  # addr line_addr -> t0
+    !line_addr RD_T0 RS1_T0 ADDI
+    RD_T0 RS1_T0 LD  # u64 0(t0) -> t0
+    ~token_ptrs_addr RD_T1 AUIPC  # addr token_ptrs_addr -> t1
+    !token_ptrs_addr RD_T1 RS1_T1 ADDI
+    RD_T1 RS1_T1 LD  # u64 0(t1) -> t1
+    RD_T2 RS1_X0 ADDI  # 0 -> t2
+:.Ltok_skip
+    RD_T3 RS1_T0 LBU  # u8 0(t0) -> t3
+    @.Ltok_done RS1_T3 RS2_X0 BEQ  # if t3 == zero goto .Ltok_done
+    !0x20 RD_T4 RS1_X0 ADDI  # ' ' -> t4
+    @.Ltok_advance RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_advance
+    !9 RD_T4 RS1_X0 ADDI  # '\t' -> t4
+    @.Ltok_advance RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_advance
+    !0x2C RD_T4 RS1_X0 ADDI  # li
+    @.Ltok_delim RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_delim
+    !0x28 RD_T4 RS1_X0 ADDI  # '(' -> t4
+    @.Ltok_delim RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_delim
+    !0x29 RD_T4 RS1_X0 ADDI  # ')' -> t4
+    @.Ltok_delim RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_delim
+    !0x23 RD_T4 RS1_X0 ADDI  # '#' -> t4
+    @.Ltok_done RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_done
+    !0x3B RD_T4 RS1_X0 ADDI  # ';' -> t4
+    @.Ltok_done RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_done
+    !0x22 RD_T4 RS1_X0 ADDI  # '"' -> t4
+    @.Ltok_string RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_string
+    !0x27 RD_T4 RS1_X0 ADDI  # '\'' -> t4
+    @.Ltok_char RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_char
+    !6 RD_T4 RS1_X0 ADDI  # TOKEN_MAX -> t4
+    @.Ltok_fail RS1_T2 RS2_T4 BGEU  # if t2 >=u t4 goto .Ltok_fail
+    RS1_T1 RS2_T0 SD  # u64 t0 -> 0(t1)
+    !8 RD_T1 RS1_T1 ADDI  # t1 + 8 -> t1
+:.Ltok_scan
+    RD_T3 RS1_T0 LBU  # u8 0(t0) -> t3
+    @.Ltok_store RS1_T3 RS2_X0 BEQ  # if t3 == zero goto .Ltok_store
+    !0x20 RD_T4 RS1_X0 ADDI  # ' ' -> t4
+    @.Ltok_store_advance RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_store_advance
+    !9 RD_T4 RS1_X0 ADDI  # '\t' -> t4
+    @.Ltok_store_advance RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_store_advance
+    !0x2C RD_T4 RS1_X0 ADDI  # li
+    @.Ltok_store_advance RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_store_advance
+    !0x28 RD_T4 RS1_X0 ADDI  # '(' -> t4
+    @.Ltok_store_advance RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_store_advance
+    !0x29 RD_T4 RS1_X0 ADDI  # ')' -> t4
+    @.Ltok_store_advance RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_store_advance
+    !0x23 RD_T4 RS1_X0 ADDI  # '#' -> t4
+    @.Ltok_store_comment RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_store_comment
+    !0x3B RD_T4 RS1_X0 ADDI  # ';' -> t4
+    @.Ltok_store_comment RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_store_comment
+    !1 RD_T0 RS1_T0 ADDI  # t0 + 1 -> t0
+    $.Ltok_scan RD_X0 JAL  # goto .Ltok_scan
+:.Ltok_store_comment
+    RS1_T0 RS2_X0 SB  # u8 zero -> 0(t0)
+    $.Ltok_store RD_X0 JAL  # goto .Ltok_store
+:.Ltok_store_advance
+    RS1_T0 RS2_X0 SB  # u8 zero -> 0(t0)
+    !1 RD_T0 RS1_T0 ADDI  # t0 + 1 -> t0
+:.Ltok_store
+    !1 RD_T2 RS1_T2 ADDI  # t2 + 1 -> t2
+    $.Ltok_skip RD_X0 JAL  # goto .Ltok_skip
+:.Ltok_advance
+    !1 RD_T0 RS1_T0 ADDI  # t0 + 1 -> t0
+    $.Ltok_skip RD_X0 JAL  # goto .Ltok_skip
+:.Ltok_delim
+    RS1_T0 RS2_X0 SB  # u8 zero -> 0(t0)
+    !1 RD_T0 RS1_T0 ADDI  # t0 + 1 -> t0
+    $.Ltok_skip RD_X0 JAL  # goto .Ltok_skip
+:.Ltok_string
+    !6 RD_T4 RS1_X0 ADDI  # TOKEN_MAX -> t4
+    @.Ltok_fail RS1_T2 RS2_T4 BGEU  # if t2 >=u t4 goto .Ltok_fail
+    !1 RD_T0 RS1_T0 ADDI  # t0 + 1 -> t0
+    RS1_T1 RS2_T0 SD  # u64 t0 -> 0(t1)
+    !8 RD_T1 RS1_T1 ADDI  # t1 + 8 -> t1
+:.Ltok_string_scan
+    RD_T3 RS1_T0 LBU  # u8 0(t0) -> t3
+    @.Ltok_fail RS1_T3 RS2_X0 BEQ  # if t3 == zero goto .Ltok_fail
+    !0x22 RD_T4 RS1_X0 ADDI  # '"' -> t4
+    @.Ltok_string_done RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_string_done
+    !1 RD_T0 RS1_T0 ADDI  # t0 + 1 -> t0
+    $.Ltok_string_scan RD_X0 JAL  # goto .Ltok_string_scan
+:.Ltok_string_done
+    RS1_T0 RS2_X0 SB  # u8 zero -> 0(t0)
+    !1 RD_T0 RS1_T0 ADDI  # t0 + 1 -> t0
+    !1 RD_T2 RS1_T2 ADDI  # t2 + 1 -> t2
+    $.Ltok_skip RD_X0 JAL  # goto .Ltok_skip
+:.Ltok_char
+    !6 RD_T4 RS1_X0 ADDI  # TOKEN_MAX -> t4
+    @.Ltok_fail RS1_T2 RS2_T4 BGEU  # if t2 >=u t4 goto .Ltok_fail
+    RS1_T1 RS2_T0 SD  # u64 t0 -> 0(t1)
+    !8 RD_T1 RS1_T1 ADDI  # t1 + 8 -> t1
+    !1 RD_T0 RS1_T0 ADDI  # t0 + 1 -> t0
+:.Ltok_char_scan
+    RD_T3 RS1_T0 LBU  # u8 0(t0) -> t3
+    @.Ltok_fail RS1_T3 RS2_X0 BEQ  # if t3 == zero goto .Ltok_fail
+    !0x5C RD_T4 RS1_X0 ADDI  # '\\' -> t4
+    @.Ltok_char_escape RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_char_escape
+    !0x27 RD_T4 RS1_X0 ADDI  # '\'' -> t4
+    @.Ltok_char_done RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_char_done
+    !1 RD_T0 RS1_T0 ADDI  # t0 + 1 -> t0
+    $.Ltok_char_scan RD_X0 JAL  # goto .Ltok_char_scan
+:.Ltok_char_escape
+    !1 RD_T0 RS1_T0 ADDI  # t0 + 1 -> t0
+    RD_T3 RS1_T0 LBU  # u8 0(t0) -> t3
+    @.Ltok_fail RS1_T3 RS2_X0 BEQ  # if t3 == zero goto .Ltok_fail
+    !1 RD_T0 RS1_T0 ADDI  # t0 + 1 -> t0
+    $.Ltok_char_scan RD_X0 JAL  # goto .Ltok_char_scan
+:.Ltok_char_done
+    !1 RD_T0 RS1_T0 ADDI  # t0 + 1 -> t0
+    RD_T3 RS1_T0 LBU  # u8 0(t0) -> t3
+    @.Ltok_char_store RS1_T3 RS2_X0 BEQ  # if t3 == zero goto .Ltok_char_store
+    !0x20 RD_T4 RS1_X0 ADDI  # ' ' -> t4
+    @.Ltok_char_store RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_char_store
+    !9 RD_T4 RS1_X0 ADDI  # '\t' -> t4
+    @.Ltok_char_store RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_char_store
+    !0x2C RD_T4 RS1_X0 ADDI  # li
+    @.Ltok_char_store RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_char_store
+    !0x28 RD_T4 RS1_X0 ADDI  # '(' -> t4
+    @.Ltok_char_store RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_char_store
+    !0x29 RD_T4 RS1_X0 ADDI  # ')' -> t4
+    @.Ltok_char_store RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_char_store
+    !0x23 RD_T4 RS1_X0 ADDI  # '#' -> t4
+    @.Ltok_char_store RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_char_store
+    !0x3B RD_T4 RS1_X0 ADDI  # ';' -> t4
+    @.Ltok_char_store RS1_T3 RS2_T4 BEQ  # if t3 == t4 goto .Ltok_char_store
+    $.Ltok_fail RD_X0 JAL  # goto .Ltok_fail
+:.Ltok_char_store
+    RS1_T0 RS2_X0 SB  # u8 zero -> 0(t0)
+    !1 RD_T2 RS1_T2 ADDI  # t2 + 1 -> t2
+    $.Ltok_skip RD_X0 JAL  # goto .Ltok_skip
+:.Ltok_done
+    RD_A0 RS1_T2 MV  # t2 -> a0
+    RETURN  # return
+:.Ltok_fail
+    !-1 RD_A0 RS1_X0 ADDI  # -1 -> a0
+    RETURN  # return
+:line_size
+    !-16 RD_SP RS1_SP ADDI  # sp += -16
+    @8 RS1_SP RS2_RA SD  # u64 ra -> 8(sp)
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_dot_equ RD_A1 AUIPC  # addr str_dot_equ -> a1
+    !str_dot_equ RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lline_size_equ RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lline_size_equ
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_dot_byte RD_A1 AUIPC  # addr str_dot_byte -> a1
+    !str_dot_byte RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lline_size_byte RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lline_size_byte
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_dot_word RD_A1 AUIPC  # addr str_dot_word -> a1
+    !str_dot_word RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lline_size_word RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lline_size_word
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_dot_string RD_A1 AUIPC  # addr str_dot_string -> a1
+    !str_dot_string RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lline_size_string RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lline_size_string
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_dot_align RD_A1 AUIPC  # addr str_dot_align -> a1
+    !str_dot_align RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lline_size_align RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lline_size_align
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_dot_dword RD_A1 AUIPC  # addr str_dot_dword -> a1
+    !str_dot_dword RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lline_size_dword RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lline_size_dword
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_dot_global RD_A1 AUIPC  # addr str_dot_global -> a1
+    !str_dot_global RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lline_size_nop RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lline_size_nop
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_dot_text RD_A1 AUIPC  # addr str_dot_text -> a1
+    !str_dot_text RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lline_size_nop RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lline_size_nop
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~instr_size RD_RA AUIPC  # call instr_size
+    !instr_size RD_RA RS1_RA JALR
+    $.Lline_size_done RD_X0 JAL  # goto .Lline_size_done
+:.Lline_size_equ
+    !3 RD_T0 RS1_X0 ADDI  # 3 -> t0
+    @.Lline_size_equ_eval RS1_S4 RS2_T0 BEQ  # if s4 == t0 goto .Lline_size_equ_eval
+    !5 RD_T0 RS1_X0 ADDI  # 5 -> t0
+    @.Lline_size_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lline_size_fail
+:.Lline_size_equ_eval
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    RD_S6 RS1_A0 MV  # a0 -> s6
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    !-2 RD_A1 RS1_S4 ADDI  # s4 + -2 -> a1
+    ~eval_expr_range RD_RA AUIPC  # call eval_expr_range
+    !eval_expr_range RD_RA RS1_RA JALR
+    @.Lline_size_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lline_size_fail
+    RD_A0 RS1_S6 MV  # s6 -> a0
+    ~add_define RD_RA AUIPC  # call add_define
+    !add_define RD_RA RS1_RA JALR
+    @.Lline_size_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lline_size_fail
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+    $.Lline_size_done RD_X0 JAL  # goto .Lline_size_done
+:.Lline_size_byte
+    !-1 RD_A0 RS1_S4 ADDI  # s4 + -1 -> a0
+    @.Lline_size_fail RS1_A0 RS2_X0 BLT  # if a0 < zero goto .Lline_size_fail
+    $.Lline_size_done RD_X0 JAL  # goto .Lline_size_done
+:.Lline_size_word
+    !2 RD_T0 RS1_X0 ADDI  # 2 -> t0
+    @.Lline_size_fail RS1_S4 RS2_T0 BLTU  # if s4 <u t0 goto .Lline_size_fail
+    !4 RD_A0 RS1_X0 ADDI  # 4 -> a0
+    $.Lline_size_done RD_X0 JAL  # goto .Lline_size_done
+:.Lline_size_string
+    !2 RD_T0 RS1_X0 ADDI  # 2 -> t0
+    @.Lline_size_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lline_size_fail
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~string_length RD_RA AUIPC  # call string_length
+    !string_length RD_RA RS1_RA JALR
+    !1 RD_A0 RS1_A0 ADDI  # a0 + 1 -> a0
+    $.Lline_size_done RD_X0 JAL  # goto .Lline_size_done
+:.Lline_size_align
+    !3 RD_T0 RS1_S3 ANDI  # s3 & 3 -> t0
+    @.Lline_size_align_done RS1_T0 RS2_X0 BEQ  # if t0 == zero goto .Lline_size_align_done
+    !4 RD_A0 RS1_X0 ADDI  # 4 -> a0
+    RD_A0 RS1_A0 RS2_T0 SUB  # a0 - t0 -> a0
+    $.Lline_size_done RD_X0 JAL  # goto .Lline_size_done
+:.Lline_size_align_done
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+    $.Lline_size_done RD_X0 JAL  # goto .Lline_size_done
+:.Lline_size_dword
+    !2 RD_T0 RS1_X0 ADDI  # 2 -> t0
+    @.Lline_size_fail RS1_S4 RS2_T0 BLTU  # if s4 <u t0 goto .Lline_size_fail
+    !8 RD_A0 RS1_X0 ADDI  # 8 -> a0
+    $.Lline_size_done RD_X0 JAL  # goto .Lline_size_done
+:.Lline_size_nop
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+    $.Lline_size_done RD_X0 JAL  # goto .Lline_size_done
+:.Lline_size_fail
+    !-1 RD_A0 RS1_X0 ADDI  # -1 -> a0
+:.Lline_size_done
+    !8 RD_RA RS1_SP LD  # u64 8(sp) -> ra
+    !0x10 RD_SP RS1_SP ADDI  # sp += 16
+    RETURN  # return
+:token_ptr
+    ~token_ptrs_addr RD_T0 AUIPC  # addr token_ptrs_addr -> t0
+    !token_ptrs_addr RD_T0 RS1_T0 ADDI
+    RD_T0 RS1_T0 LD  # u64 0(t0) -> t0
+    !3 RD_T1 RS1_A0 SLLI  # a0 << 3 -> t1
+    RD_T0 RS1_T0 RS2_T1 ADD  # t0 + t1 -> t0
+    RD_A0 RS1_T0 LD  # u64 0(t0) -> a0
+    RETURN  # return
+:split_label
+    RD_T0 RS1_A0 MV  # a0 -> t0
+:.Lsplit_scan
+    RD_T1 RS1_T0 LBU  # u8 0(t0) -> t1
+    @.Lsplit_no RS1_T1 RS2_X0 BEQ  # if t1 == zero goto .Lsplit_no
+    !0x3A RD_T2 RS1_X0 ADDI  # ':' -> t2
+    @.Lsplit_yes RS1_T1 RS2_T2 BEQ  # if t1 == t2 goto .Lsplit_yes
+    !1 RD_T0 RS1_T0 ADDI  # t0 + 1 -> t0
+    $.Lsplit_scan RD_X0 JAL  # goto .Lsplit_scan
+:.Lsplit_yes
+    !1 RD_T1 RS1_T0 LBU  # u8 1(t0) -> t1
+    @.Lsplit_no RS1_T1 RS2_X0 BNE  # if t1 != zero goto .Lsplit_no
+    RS1_T0 RS2_X0 SB  # u8 zero -> 0(t0)
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    RETURN  # return
+:.Lsplit_no
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+    RETURN  # return
+:instr_size
+    !-16 RD_SP RS1_SP ADDI  # sp += -16
+    @8 RS1_SP RS2_RA SD  # u64 ra -> 8(sp)
+    ~str_addi RD_A1 AUIPC  # addr str_addi -> a1
+    !str_addi RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_sd RD_A1 AUIPC  # addr str_sd -> a1
+    !str_sd RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_ld RD_A1 AUIPC  # addr str_ld -> a1
+    !str_ld RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_add RD_A1 AUIPC  # addr str_add -> a1
+    !str_add RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_sub RD_A1 AUIPC  # addr str_sub -> a1
+    !str_sub RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_beq RD_A1 AUIPC  # addr str_beq -> a1
+    !str_beq RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_jal RD_A1 AUIPC  # addr str_jal -> a1
+    !str_jal RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_jalr RD_A1 AUIPC  # addr str_jalr -> a1
+    !str_jalr RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_lui RD_A1 AUIPC  # addr str_lui -> a1
+    !str_lui RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_lbu RD_A1 AUIPC  # addr str_lbu -> a1
+    !str_lbu RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_and RD_A1 AUIPC  # addr str_and -> a1
+    !str_and RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bge RD_A1 AUIPC  # addr str_bge -> a1
+    !str_bge RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bgeu RD_A1 AUIPC  # addr str_bgeu -> a1
+    !str_bgeu RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_blt RD_A1 AUIPC  # addr str_blt -> a1
+    !str_blt RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bltu RD_A1 AUIPC  # addr str_bltu -> a1
+    !str_bltu RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bne RD_A1 AUIPC  # addr str_bne -> a1
+    !str_bne RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_ebreak RD_A1 AUIPC  # addr str_ebreak -> a1
+    !str_ebreak RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_ecall RD_A1 AUIPC  # addr str_ecall -> a1
+    !str_ecall RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_fence RD_A1 AUIPC  # addr str_fence -> a1
+    !str_fence RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_fence_i RD_A1 AUIPC  # addr str_fence_i -> a1
+    !str_fence_i RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_sb RD_A1 AUIPC  # addr str_sb -> a1
+    !str_sb RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_or RD_A1 AUIPC  # addr str_or -> a1
+    !str_or RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_slt RD_A1 AUIPC  # addr str_slt -> a1
+    !str_slt RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_sltiu RD_A1 AUIPC  # addr str_sltiu -> a1
+    !str_sltiu RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_sltu RD_A1 AUIPC  # addr str_sltu -> a1
+    !str_sltu RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_subw RD_A1 AUIPC  # addr str_subw -> a1
+    !str_subw RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_xor RD_A1 AUIPC  # addr str_xor -> a1
+    !str_xor RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_xori RD_A1 AUIPC  # addr str_xori -> a1
+    !str_xori RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_j RD_A1 AUIPC  # addr str_j -> a1
+    !str_j RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_jr RD_A1 AUIPC  # addr str_jr -> a1
+    !str_jr RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_beqz RD_A1 AUIPC  # addr str_beqz -> a1
+    !str_beqz RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bnez RD_A1 AUIPC  # addr str_bnez -> a1
+    !str_bnez RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_blez RD_A1 AUIPC  # addr str_blez -> a1
+    !str_blez RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bgez RD_A1 AUIPC  # addr str_bgez -> a1
+    !str_bgez RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bltz RD_A1 AUIPC  # addr str_bltz -> a1
+    !str_bltz RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bgtz RD_A1 AUIPC  # addr str_bgtz -> a1
+    !str_bgtz RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bgt RD_A1 AUIPC  # addr str_bgt -> a1
+    !str_bgt RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_ble RD_A1 AUIPC  # addr str_ble -> a1
+    !str_ble RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bgtu RD_A1 AUIPC  # addr str_bgtu -> a1
+    !str_bgtu RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bleu RD_A1 AUIPC  # addr str_bleu -> a1
+    !str_bleu RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_call RD_A1 AUIPC  # addr str_call -> a1
+    !str_call RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_8 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_8
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_tail RD_A1 AUIPC  # addr str_tail -> a1
+    !str_tail RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_8 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_8
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_mv RD_A1 AUIPC  # addr str_mv -> a1
+    !str_mv RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_ret RD_A1 AUIPC  # addr str_ret -> a1
+    !str_ret RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_li RD_A1 AUIPC  # addr str_li -> a1
+    !str_li RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_li RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_li
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_la RD_A1 AUIPC  # addr str_la -> a1
+    !str_la RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_8 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_8
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_lw RD_A1 AUIPC  # addr str_lw -> a1
+    !str_lw RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_lwu RD_A1 AUIPC  # addr str_lwu -> a1
+    !str_lwu RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_sw RD_A1 AUIPC  # addr str_sw -> a1
+    !str_sw RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_slli RD_A1 AUIPC  # addr str_slli -> a1
+    !str_slli RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_srli RD_A1 AUIPC  # addr str_srli -> a1
+    !str_srli RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_andi RD_A1 AUIPC  # addr str_andi -> a1
+    !str_andi RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_mul RD_A1 AUIPC  # addr str_mul -> a1
+    !str_mul RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_neg RD_A1 AUIPC  # addr str_neg -> a1
+    !str_neg RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_negw RD_A1 AUIPC  # addr str_negw -> a1
+    !str_negw RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_not RD_A1 AUIPC  # addr str_not -> a1
+    !str_not RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_seqz RD_A1 AUIPC  # addr str_seqz -> a1
+    !str_seqz RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_snez RD_A1 AUIPC  # addr str_snez -> a1
+    !str_snez RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_sgtz RD_A1 AUIPC  # addr str_sgtz -> a1
+    !str_sgtz RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_sltz RD_A1 AUIPC  # addr str_sltz -> a1
+    !str_sltz RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lsize_4 RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lsize_4
+    !-1 RD_A0 RS1_X0 ADDI  # -1 -> a0
+    $.Linstr_size_done RD_X0 JAL  # goto .Linstr_size_done
+:.Lsize_4
+    !4 RD_A0 RS1_X0 ADDI  # 4 -> a0
+    $.Linstr_size_done RD_X0 JAL  # goto .Linstr_size_done
+:.Lsize_8
+    !8 RD_A0 RS1_X0 ADDI  # 8 -> a0
+    $.Linstr_size_done RD_X0 JAL  # goto .Linstr_size_done
+:.Lsize_li
+    !3 RD_T0 RS1_X0 ADDI  # 3 -> t0
+    @.Lsize_li_expr RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lsize_li_expr
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    !1 RD_A1 RS1_X0 ADDI  # 1 -> a1
+    ~eval_expr_range RD_RA AUIPC  # call eval_expr_range
+    !eval_expr_range RD_RA RS1_RA JALR
+    @.Lsize_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lsize_fail
+    $.Lsize_li_check RD_X0 JAL  # goto .Lsize_li_check
+:.Lsize_li_expr
+    !5 RD_T0 RS1_X0 ADDI  # 5 -> t0
+    @.Lsize_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lsize_fail
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    !3 RD_A1 RS1_X0 ADDI  # 3 -> a1
+    ~eval_expr_range RD_RA AUIPC  # call eval_expr_range
+    !eval_expr_range RD_RA RS1_RA JALR
+    @.Lsize_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lsize_fail
+:.Lsize_li_check
+    !-2048 RD_T0 RS1_X0 ADDI  # -2048 -> t0
+    @.Lsize_li_wide RS1_A1 RS2_T0 BLT  # if a1 < t0 goto .Lsize_li_wide
+    ~0x800 RD_T0 LUI  # 2048 -> t0
+    !0x800 RD_T0 RS1_T0 ADDIW
+    @.Lsize_li_wide RS1_A1 RS2_T0 BGE  # if a1 >= t0 goto .Lsize_li_wide
+    !4 RD_A0 RS1_X0 ADDI  # 4 -> a0
+    $.Linstr_size_done RD_X0 JAL  # goto .Linstr_size_done
+:.Lsize_li_wide
+    ~0xFFF RD_T0 LUI  # 0xfff -> t0
+    !0xFFF RD_T0 RS1_T0 ADDIW
+    RD_T1 RS1_A1 RS2_T0 AND  # a1 & t0 -> t1
+    @.Lsize_4 RS1_T1 RS2_X0 BEQ  # if t1 == zero goto .Lsize_4
+    $.Lsize_8 RD_X0 JAL  # goto .Lsize_8
+:.Lsize_fail
+    !-1 RD_A0 RS1_X0 ADDI  # -1 -> a0
+:.Linstr_size_done
+    !8 RD_RA RS1_SP LD  # u64 8(sp) -> ra
+    !0x10 RD_SP RS1_SP ADDI  # sp += 16
+    RETURN  # return
+:emit_line
+    !-16 RD_SP RS1_SP ADDI  # sp += -16
+    @8 RS1_SP RS2_RA SD  # u64 ra -> 8(sp)
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_dot_equ RD_A1 AUIPC  # addr str_dot_equ -> a1
+    !str_dot_equ RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lemit_line_equ RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lemit_line_equ
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_dot_byte RD_A1 AUIPC  # addr str_dot_byte -> a1
+    !str_dot_byte RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lemit_line_byte RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lemit_line_byte
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_dot_word RD_A1 AUIPC  # addr str_dot_word -> a1
+    !str_dot_word RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lemit_line_word RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lemit_line_word
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_dot_string RD_A1 AUIPC  # addr str_dot_string -> a1
+    !str_dot_string RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lemit_line_string RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lemit_line_string
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_dot_align RD_A1 AUIPC  # addr str_dot_align -> a1
+    !str_dot_align RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lemit_line_align RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lemit_line_align
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_dot_dword RD_A1 AUIPC  # addr str_dot_dword -> a1
+    !str_dot_dword RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lemit_line_dword RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lemit_line_dword
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_dot_global RD_A1 AUIPC  # addr str_dot_global -> a1
+    !str_dot_global RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lemit_line_nop RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lemit_line_nop
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_dot_text RD_A1 AUIPC  # addr str_dot_text -> a1
+    !str_dot_text RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lemit_line_nop RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lemit_line_nop
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~emit_instruction RD_RA AUIPC  # call emit_instruction
+    !emit_instruction RD_RA RS1_RA JALR
+    $.Lemit_line_done RD_X0 JAL  # goto .Lemit_line_done
+:.Lemit_line_equ
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $.Lemit_line_done RD_X0 JAL  # goto .Lemit_line_done
+:.Lemit_line_byte
+    ~emit_dot_byte RD_RA AUIPC  # call emit_dot_byte
+    !emit_dot_byte RD_RA RS1_RA JALR
+    $.Lemit_line_done RD_X0 JAL  # goto .Lemit_line_done
+:.Lemit_line_word
+    ~emit_dot_word RD_RA AUIPC  # call emit_dot_word
+    !emit_dot_word RD_RA RS1_RA JALR
+    $.Lemit_line_done RD_X0 JAL  # goto .Lemit_line_done
+:.Lemit_line_string
+    ~emit_dot_string RD_RA AUIPC  # call emit_dot_string
+    !emit_dot_string RD_RA RS1_RA JALR
+    $.Lemit_line_done RD_X0 JAL  # goto .Lemit_line_done
+:.Lemit_line_align
+    ~emit_dot_align RD_RA AUIPC  # call emit_dot_align
+    !emit_dot_align RD_RA RS1_RA JALR
+    $.Lemit_line_done RD_X0 JAL  # goto .Lemit_line_done
+:.Lemit_line_dword
+    ~emit_dot_dword RD_RA AUIPC  # call emit_dot_dword
+    !emit_dot_dword RD_RA RS1_RA JALR
+    $.Lemit_line_done RD_X0 JAL  # goto .Lemit_line_done
+:.Lemit_line_nop
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+:.Lemit_line_done
+    !8 RD_RA RS1_SP LD  # u64 8(sp) -> ra
+    !0x10 RD_SP RS1_SP ADDI  # sp += 16
+    RETURN  # return
+:emit_instruction
+    !-16 RD_SP RS1_SP ADDI  # sp += -16
+    @8 RS1_SP RS2_RA SD  # u64 ra -> 8(sp)
+    ~str_addi RD_A1 AUIPC  # addr str_addi -> a1
+    !str_addi RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_addi RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_addi
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_sd RD_A1 AUIPC  # addr str_sd -> a1
+    !str_sd RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_sd RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_sd
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_ld RD_A1 AUIPC  # addr str_ld -> a1
+    !str_ld RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_ld RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_ld
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_add RD_A1 AUIPC  # addr str_add -> a1
+    !str_add RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_add RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_add
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_sub RD_A1 AUIPC  # addr str_sub -> a1
+    !str_sub RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_sub RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_sub
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_beq RD_A1 AUIPC  # addr str_beq -> a1
+    !str_beq RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_beq RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_beq
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_jal RD_A1 AUIPC  # addr str_jal -> a1
+    !str_jal RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_jal RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_jal
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_jalr RD_A1 AUIPC  # addr str_jalr -> a1
+    !str_jalr RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_jalr RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_jalr
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_lui RD_A1 AUIPC  # addr str_lui -> a1
+    !str_lui RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_lui RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_lui
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_lbu RD_A1 AUIPC  # addr str_lbu -> a1
+    !str_lbu RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_lbu RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_lbu
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_and RD_A1 AUIPC  # addr str_and -> a1
+    !str_and RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_and RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_and
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bge RD_A1 AUIPC  # addr str_bge -> a1
+    !str_bge RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_bge RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_bge
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bgeu RD_A1 AUIPC  # addr str_bgeu -> a1
+    !str_bgeu RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_bgeu RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_bgeu
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_blt RD_A1 AUIPC  # addr str_blt -> a1
+    !str_blt RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_blt RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_blt
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bltu RD_A1 AUIPC  # addr str_bltu -> a1
+    !str_bltu RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_bltu RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_bltu
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bne RD_A1 AUIPC  # addr str_bne -> a1
+    !str_bne RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_bne RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_bne
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_ebreak RD_A1 AUIPC  # addr str_ebreak -> a1
+    !str_ebreak RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_ebreak RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_ebreak
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_ecall RD_A1 AUIPC  # addr str_ecall -> a1
+    !str_ecall RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_ecall RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_ecall
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_fence RD_A1 AUIPC  # addr str_fence -> a1
+    !str_fence RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_fence RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_fence
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_fence_i RD_A1 AUIPC  # addr str_fence_i -> a1
+    !str_fence_i RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_fence_i RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_fence_i
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_sb RD_A1 AUIPC  # addr str_sb -> a1
+    !str_sb RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_sb RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_sb
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_or RD_A1 AUIPC  # addr str_or -> a1
+    !str_or RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_or RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_or
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_slt RD_A1 AUIPC  # addr str_slt -> a1
+    !str_slt RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_slt RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_slt
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_sltiu RD_A1 AUIPC  # addr str_sltiu -> a1
+    !str_sltiu RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_sltiu RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_sltiu
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_sltu RD_A1 AUIPC  # addr str_sltu -> a1
+    !str_sltu RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_sltu RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_sltu
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_subw RD_A1 AUIPC  # addr str_subw -> a1
+    !str_subw RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_subw RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_subw
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_xor RD_A1 AUIPC  # addr str_xor -> a1
+    !str_xor RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_xor RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_xor
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_xori RD_A1 AUIPC  # addr str_xori -> a1
+    !str_xori RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_xori RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_xori
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_j RD_A1 AUIPC  # addr str_j -> a1
+    !str_j RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_j RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_j
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_jr RD_A1 AUIPC  # addr str_jr -> a1
+    !str_jr RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_jr RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_jr
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_beqz RD_A1 AUIPC  # addr str_beqz -> a1
+    !str_beqz RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_beqz RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_beqz
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bnez RD_A1 AUIPC  # addr str_bnez -> a1
+    !str_bnez RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_bnez RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_bnez
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_blez RD_A1 AUIPC  # addr str_blez -> a1
+    !str_blez RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_blez RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_blez
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bgez RD_A1 AUIPC  # addr str_bgez -> a1
+    !str_bgez RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_bgez RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_bgez
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bltz RD_A1 AUIPC  # addr str_bltz -> a1
+    !str_bltz RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_bltz RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_bltz
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bgtz RD_A1 AUIPC  # addr str_bgtz -> a1
+    !str_bgtz RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_bgtz RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_bgtz
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bgt RD_A1 AUIPC  # addr str_bgt -> a1
+    !str_bgt RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_bgt RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_bgt
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_ble RD_A1 AUIPC  # addr str_ble -> a1
+    !str_ble RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_ble RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_ble
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bgtu RD_A1 AUIPC  # addr str_bgtu -> a1
+    !str_bgtu RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_bgtu RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_bgtu
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_bleu RD_A1 AUIPC  # addr str_bleu -> a1
+    !str_bleu RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_bleu RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_bleu
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_call RD_A1 AUIPC  # addr str_call -> a1
+    !str_call RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_call RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_call
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_tail RD_A1 AUIPC  # addr str_tail -> a1
+    !str_tail RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_tail RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_tail
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_mv RD_A1 AUIPC  # addr str_mv -> a1
+    !str_mv RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_mv RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_mv
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_ret RD_A1 AUIPC  # addr str_ret -> a1
+    !str_ret RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_ret RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_ret
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_li RD_A1 AUIPC  # addr str_li -> a1
+    !str_li RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_li RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_li
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_la RD_A1 AUIPC  # addr str_la -> a1
+    !str_la RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_la RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_la
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_lw RD_A1 AUIPC  # addr str_lw -> a1
+    !str_lw RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_lw RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_lw
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_lwu RD_A1 AUIPC  # addr str_lwu -> a1
+    !str_lwu RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_lwu RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_lwu
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_sw RD_A1 AUIPC  # addr str_sw -> a1
+    !str_sw RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_sw RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_sw
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_slli RD_A1 AUIPC  # addr str_slli -> a1
+    !str_slli RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_slli RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_slli
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_srli RD_A1 AUIPC  # addr str_srli -> a1
+    !str_srli RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_srli RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_srli
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_andi RD_A1 AUIPC  # addr str_andi -> a1
+    !str_andi RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_andi RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_andi
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_mul RD_A1 AUIPC  # addr str_mul -> a1
+    !str_mul RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_mul RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_mul
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_neg RD_A1 AUIPC  # addr str_neg -> a1
+    !str_neg RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_neg RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_neg
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_negw RD_A1 AUIPC  # addr str_negw -> a1
+    !str_negw RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_negw RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_negw
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_not RD_A1 AUIPC  # addr str_not -> a1
+    !str_not RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_not RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_not
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_seqz RD_A1 AUIPC  # addr str_seqz -> a1
+    !str_seqz RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_seqz RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_seqz
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_snez RD_A1 AUIPC  # addr str_snez -> a1
+    !str_snez RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_snez RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_snez
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_sgtz RD_A1 AUIPC  # addr str_sgtz -> a1
+    !str_sgtz RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_sgtz RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_sgtz
+    RD_A0 RS1_S5 MV  # s5 -> a0
+    ~str_sltz RD_A1 AUIPC  # addr str_sltz -> a1
+    !str_sltz RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Ldispatch_sltz RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Ldispatch_sltz
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_addi
+    ~emit_addi RD_RA AUIPC  # call emit_addi
+    !emit_addi RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_sd
+    ~emit_sd RD_RA AUIPC  # call emit_sd
+    !emit_sd RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_ld
+    ~emit_ld RD_RA AUIPC  # call emit_ld
+    !emit_ld RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_add
+    ~emit_add RD_RA AUIPC  # call emit_add
+    !emit_add RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_sub
+    ~emit_sub RD_RA AUIPC  # call emit_sub
+    !emit_sub RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_beq
+    ~emit_beq RD_RA AUIPC  # call emit_beq
+    !emit_beq RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_jal
+    ~emit_jal RD_RA AUIPC  # call emit_jal
+    !emit_jal RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_jalr
+    ~emit_jalr RD_RA AUIPC  # call emit_jalr
+    !emit_jalr RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_lui
+    ~emit_lui RD_RA AUIPC  # call emit_lui
+    !emit_lui RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_lbu
+    ~emit_lbu RD_RA AUIPC  # call emit_lbu
+    !emit_lbu RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_and
+    ~emit_and RD_RA AUIPC  # call emit_and
+    !emit_and RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_bge
+    ~0x5063 RD_A1 LUI  # RV_MATCH_BGE -> a1
+    !0x5063 RD_A1 RS1_A1 ADDIW
+    ~emit_b_common RD_RA AUIPC  # call emit_b_common
+    !emit_b_common RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_bgeu
+    ~0x7063 RD_A1 LUI  # RV_MATCH_BGEU -> a1
+    !0x7063 RD_A1 RS1_A1 ADDIW
+    ~emit_b_common RD_RA AUIPC  # call emit_b_common
+    !emit_b_common RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_blt
+    ~0x4063 RD_A1 LUI  # RV_MATCH_BLT -> a1
+    !0x4063 RD_A1 RS1_A1 ADDIW
+    ~emit_b_common RD_RA AUIPC  # call emit_b_common
+    !emit_b_common RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_bltu
+    ~0x6063 RD_A1 LUI  # RV_MATCH_BLTU -> a1
+    !0x6063 RD_A1 RS1_A1 ADDIW
+    ~emit_b_common RD_RA AUIPC  # call emit_b_common
+    !emit_b_common RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_bne
+    ~0x1063 RD_A1 LUI  # RV_MATCH_BNE -> a1
+    !0x1063 RD_A1 RS1_A1 ADDIW
+    ~emit_b_common RD_RA AUIPC  # call emit_b_common
+    !emit_b_common RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_ebreak
+    ~0x100073 RD_A1 LUI  # RV_MATCH_EBREAK -> a1
+    !0x100073 RD_A1 RS1_A1 ADDIW
+    ~emit_fixed RD_RA AUIPC  # call emit_fixed
+    !emit_fixed RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_ecall
+    !0x73 RD_A1 RS1_X0 ADDI  # RV_MATCH_ECALL -> a1
+    ~emit_fixed RD_RA AUIPC  # call emit_fixed
+    !emit_fixed RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_fence
+    ~0xFF0000F RD_A1 LUI  # RV_MATCH_FENCE -> a1
+    !0xFF0000F RD_A1 RS1_A1 ADDIW
+    ~emit_fixed RD_RA AUIPC  # call emit_fixed
+    !emit_fixed RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_fence_i
+    ~0x100F RD_A1 LUI  # RV_MATCH_FENCE_I -> a1
+    !0x100F RD_A1 RS1_A1 ADDIW
+    ~emit_fixed RD_RA AUIPC  # call emit_fixed
+    !emit_fixed RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_or
+    ~emit_or RD_RA AUIPC  # call emit_or
+    !emit_or RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_slt
+    ~emit_slt RD_RA AUIPC  # call emit_slt
+    !emit_slt RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_sltiu
+    ~0x3013 RD_A1 LUI  # RV_MATCH_SLTIU -> a1
+    !0x3013 RD_A1 RS1_A1 ADDIW
+    ~emit_i_common RD_RA AUIPC  # call emit_i_common
+    !emit_i_common RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_sltu
+    ~emit_sltu RD_RA AUIPC  # call emit_sltu
+    !emit_sltu RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_subw
+    ~emit_subw RD_RA AUIPC  # call emit_subw
+    !emit_subw RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_xor
+    ~emit_xor RD_RA AUIPC  # call emit_xor
+    !emit_xor RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_xori
+    ~0x4013 RD_A1 LUI  # RV_MATCH_XORI -> a1
+    !0x4013 RD_A1 RS1_A1 ADDIW
+    ~emit_i_common RD_RA AUIPC  # call emit_i_common
+    !emit_i_common RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_j
+    ~emit_j RD_RA AUIPC  # call emit_j
+    !emit_j RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_jr
+    ~emit_jr RD_RA AUIPC  # call emit_jr
+    !emit_jr RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_beqz
+    !0x63 RD_A1 RS1_X0 ADDI  # RV_MATCH_BEQ -> a1
+    ~emit_b_zero_rs RD_RA AUIPC  # call emit_b_zero_rs
+    !emit_b_zero_rs RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_bnez
+    ~0x1063 RD_A1 LUI  # RV_MATCH_BNE -> a1
+    !0x1063 RD_A1 RS1_A1 ADDIW
+    ~emit_b_zero_rs RD_RA AUIPC  # call emit_b_zero_rs
+    !emit_b_zero_rs RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_blez
+    ~0x5063 RD_A1 LUI  # RV_MATCH_BGE -> a1
+    !0x5063 RD_A1 RS1_A1 ADDIW
+    ~emit_b_zero_left RD_RA AUIPC  # call emit_b_zero_left
+    !emit_b_zero_left RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_bgez
+    ~0x5063 RD_A1 LUI  # RV_MATCH_BGE -> a1
+    !0x5063 RD_A1 RS1_A1 ADDIW
+    ~emit_b_zero_rs RD_RA AUIPC  # call emit_b_zero_rs
+    !emit_b_zero_rs RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_bltz
+    ~0x4063 RD_A1 LUI  # RV_MATCH_BLT -> a1
+    !0x4063 RD_A1 RS1_A1 ADDIW
+    ~emit_b_zero_rs RD_RA AUIPC  # call emit_b_zero_rs
+    !emit_b_zero_rs RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_bgtz
+    ~0x4063 RD_A1 LUI  # RV_MATCH_BLT -> a1
+    !0x4063 RD_A1 RS1_A1 ADDIW
+    ~emit_b_zero_left RD_RA AUIPC  # call emit_b_zero_left
+    !emit_b_zero_left RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_bgt
+    ~0x4063 RD_A1 LUI  # RV_MATCH_BLT -> a1
+    !0x4063 RD_A1 RS1_A1 ADDIW
+    ~emit_b_swap RD_RA AUIPC  # call emit_b_swap
+    !emit_b_swap RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_ble
+    ~0x5063 RD_A1 LUI  # RV_MATCH_BGE -> a1
+    !0x5063 RD_A1 RS1_A1 ADDIW
+    ~emit_b_swap RD_RA AUIPC  # call emit_b_swap
+    !emit_b_swap RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_bgtu
+    ~0x6063 RD_A1 LUI  # RV_MATCH_BLTU -> a1
+    !0x6063 RD_A1 RS1_A1 ADDIW
+    ~emit_b_swap RD_RA AUIPC  # call emit_b_swap
+    !emit_b_swap RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_bleu
+    ~0x7063 RD_A1 LUI  # RV_MATCH_BGEU -> a1
+    !0x7063 RD_A1 RS1_A1 ADDIW
+    ~emit_b_swap RD_RA AUIPC  # call emit_b_swap
+    !emit_b_swap RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_call
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    !1 RD_A1 RS1_X0 ADDI  # 1 -> a1
+    !1 RD_A2 RS1_X0 ADDI  # 1 -> a2
+    ~emit_call_like RD_RA AUIPC  # call emit_call_like
+    !emit_call_like RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_tail
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+    !6 RD_A1 RS1_X0 ADDI  # 6 -> a1
+    RD_A2 RS1_X0 ADDI  # 0 -> a2
+    ~emit_call_like RD_RA AUIPC  # call emit_call_like
+    !emit_call_like RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_mv
+    ~emit_mv RD_RA AUIPC  # call emit_mv
+    !emit_mv RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_ret
+    ~emit_ret RD_RA AUIPC  # call emit_ret
+    !emit_ret RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_li
+    ~emit_li RD_RA AUIPC  # call emit_li
+    !emit_li RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_la
+    ~emit_la RD_RA AUIPC  # call emit_la
+    !emit_la RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_lw
+    ~0x2003 RD_A1 LUI  # RV_MATCH_LW -> a1
+    !0x2003 RD_A1 RS1_A1 ADDIW
+    ~emit_load_common RD_RA AUIPC  # call emit_load_common
+    !emit_load_common RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_lwu
+    ~0x6003 RD_A1 LUI  # RV_MATCH_LWU -> a1
+    !0x6003 RD_A1 RS1_A1 ADDIW
+    ~emit_load_common RD_RA AUIPC  # call emit_load_common
+    !emit_load_common RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_sw
+    ~0x2023 RD_A1 LUI  # RV_MATCH_SW -> a1
+    !0x2023 RD_A1 RS1_A1 ADDIW
+    ~emit_s_common RD_RA AUIPC  # call emit_s_common
+    !emit_s_common RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_slli
+    ~0x1013 RD_A1 LUI  # RV_MATCH_SLLI -> a1
+    !0x1013 RD_A1 RS1_A1 ADDIW
+    ~emit_i_common RD_RA AUIPC  # call emit_i_common
+    !emit_i_common RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_srli
+    ~0x5013 RD_A1 LUI  # RV_MATCH_SRLI -> a1
+    !0x5013 RD_A1 RS1_A1 ADDIW
+    ~emit_i_common RD_RA AUIPC  # call emit_i_common
+    !emit_i_common RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_andi
+    ~0x7013 RD_A1 LUI  # RV_MATCH_ANDI -> a1
+    !0x7013 RD_A1 RS1_A1 ADDIW
+    ~emit_i_common RD_RA AUIPC  # call emit_i_common
+    !emit_i_common RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_mul
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~0x2000033 RD_A1 LUI  # RV_MATCH_MUL -> a1
+    !0x2000033 RD_A1 RS1_A1 ADDIW
+    ~emit_r_common RD_RA AUIPC  # call emit_r_common
+    !emit_r_common RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_neg
+    ~0x40000033 RD_A1 LUI  # RV_MATCH_SUB -> a1
+    !0x40000033 RD_A1 RS1_A1 ADDIW
+    ~emit_zero_left_r RD_RA AUIPC  # call emit_zero_left_r
+    !emit_zero_left_r RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_negw
+    ~0x4000003B RD_A1 LUI  # RV_MATCH_SUBW -> a1
+    !0x4000003B RD_A1 RS1_A1 ADDIW
+    ~emit_zero_left_r RD_RA AUIPC  # call emit_zero_left_r
+    !emit_zero_left_r RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_not
+    ~emit_not RD_RA AUIPC  # call emit_not
+    !emit_not RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_seqz
+    ~emit_seqz RD_RA AUIPC  # call emit_seqz
+    !emit_seqz RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_snez
+    ~0x3033 RD_A1 LUI  # RV_MATCH_SLTU -> a1
+    !0x3033 RD_A1 RS1_A1 ADDIW
+    ~emit_zero_left_r RD_RA AUIPC  # call emit_zero_left_r
+    !emit_zero_left_r RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_sgtz
+    ~0x2033 RD_A1 LUI  # RV_MATCH_SLT -> a1
+    !0x2033 RD_A1 RS1_A1 ADDIW
+    ~emit_zero_left_r RD_RA AUIPC  # call emit_zero_left_r
+    !emit_zero_left_r RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_sltz
+    ~0x2033 RD_A1 LUI  # RV_MATCH_SLT -> a1
+    !0x2033 RD_A1 RS1_A1 ADDIW
+    ~emit_zero_right_r RD_RA AUIPC  # call emit_zero_right_r
+    !emit_zero_right_r RD_RA RS1_RA JALR
+    $.Lemit_instruction_done RD_X0 JAL  # goto .Lemit_instruction_done
+:.Ldispatch_sb
+    ~emit_sb RD_RA AUIPC  # call emit_sb
+    !emit_sb RD_RA RS1_RA JALR
+:.Lemit_instruction_done
+    !8 RD_RA RS1_SP LD  # u64 8(sp) -> ra
+    !0x10 RD_SP RS1_SP ADDI  # sp += 16
+    RETURN  # return
+:emit_add
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    !0x33 RD_A1 RS1_X0 ADDI  # RV_MATCH_ADD -> a1
+    $emit_r_common RD_X0 JAL  # goto emit_r_common
+:emit_or
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~0x6033 RD_A1 LUI  # RV_MATCH_OR -> a1
+    !0x6033 RD_A1 RS1_A1 ADDIW
+    $emit_r_common RD_X0 JAL  # goto emit_r_common
+:emit_slt
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~0x2033 RD_A1 LUI  # RV_MATCH_SLT -> a1
+    !0x2033 RD_A1 RS1_A1 ADDIW
+    $emit_r_common RD_X0 JAL  # goto emit_r_common
+:emit_sltu
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~0x3033 RD_A1 LUI  # RV_MATCH_SLTU -> a1
+    !0x3033 RD_A1 RS1_A1 ADDIW
+    $emit_r_common RD_X0 JAL  # goto emit_r_common
+:emit_sub
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~0x40000033 RD_A1 LUI  # RV_MATCH_SUB -> a1
+    !0x40000033 RD_A1 RS1_A1 ADDIW
+    $emit_r_common RD_X0 JAL  # goto emit_r_common
+:emit_subw
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~0x4000003B RD_A1 LUI  # RV_MATCH_SUBW -> a1
+    !0x4000003B RD_A1 RS1_A1 ADDIW
+    $emit_r_common RD_X0 JAL  # goto emit_r_common
+:emit_and
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~0x7033 RD_A1 LUI  # RV_MATCH_AND -> a1
+    !0x7033 RD_A1 RS1_A1 ADDIW
+    $emit_r_common RD_X0 JAL  # goto emit_r_common
+:emit_xor
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~0x4033 RD_A1 LUI  # RV_MATCH_XOR -> a1
+    !0x4033 RD_A1 RS1_A1 ADDIW
+    $emit_r_common RD_X0 JAL  # goto emit_r_common
+:emit_r_common
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !4 RD_T0 RS1_X0 ADDI  # 4 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    RD_S6 RS1_A1 MV  # a1 -> s6
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RS1_SP RS2_A1 SW  # u32 a1 -> 0(sp)
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @4 RS1_SP RS2_A1 SW  # u32 a1 -> 4(sp)
+    !3 RD_A0 RS1_X0 ADDI  # 3 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @8 RS1_SP RS2_A1 SW  # u32 a1 -> 8(sp)
+    RD_T1 RS1_SP LW  # i32 0(sp) -> t1
+    !4 RD_T2 RS1_SP LW  # i32 4(sp) -> t2
+    !8 RD_T3 RS1_SP LW  # i32 8(sp) -> t3
+    !7 RD_T1 RS1_T1 SLLI  # t1 << 7 -> t1
+    !0xF RD_T2 RS1_T2 SLLI  # t2 << 15 -> t2
+    !0x14 RD_T3 RS1_T3 SLLI  # t3 << 20 -> t3
+    RD_T0 RS1_S6 RS2_T1 OR  # s6 | t1 -> t0
+    RD_T0 RS1_T0 RS2_T2 OR  # t0 | t2 -> t0
+    RD_A0 RS1_T0 RS2_T3 OR  # t0 | t3 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_addi
+    !0x13 RD_A1 RS1_X0 ADDI  # RV_MATCH_ADDI -> a1
+    $emit_i_common RD_X0 JAL  # goto emit_i_common
+:emit_jalr
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !2 RD_T0 RS1_X0 ADDI  # 2 -> t0
+    @.Lemit_jalr_one RS1_S4 RS2_T0 BEQ  # if s4 == t0 goto .Lemit_jalr_one
+    !4 RD_T0 RS1_X0 ADDI  # 4 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    !0x67 RD_A1 RS1_X0 ADDI  # RV_MATCH_JALR -> a1
+    ~emit_i_common RD_RA AUIPC  # call emit_i_common
+    !emit_i_common RD_RA RS1_RA JALR
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:.Lemit_jalr_one
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @4 RS1_SP RS2_A1 SW  # u32 a1 -> 4(sp)
+    !1 RD_T1 RS1_X0 ADDI  # 1 -> t1
+    RS1_SP RS2_T1 SW  # u32 t1 -> 0(sp)
+    @8 RS1_SP RS2_X0 SW  # u32 zero -> 8(sp)
+    RD_T1 RS1_SP LW  # i32 0(sp) -> t1
+    !4 RD_T2 RS1_SP LW  # i32 4(sp) -> t2
+    !8 RD_T3 RS1_SP LW  # i32 8(sp) -> t3
+    ~0xFFF RD_T4 LUI  # 0xfff -> t4
+    !0xFFF RD_T4 RS1_T4 ADDIW
+    RD_T3 RS1_T3 RS2_T4 AND  # t3 & t4 -> t3
+    !7 RD_T1 RS1_T1 SLLI  # t1 << 7 -> t1
+    !0xF RD_T2 RS1_T2 SLLI  # t2 << 15 -> t2
+    !0x14 RD_T3 RS1_T3 SLLI  # t3 << 20 -> t3
+    !0x67 RD_T4 RS1_X0 ADDI  # RV_MATCH_JALR -> t4
+    RD_T0 RS1_T4 RS2_T1 OR  # t4 | t1 -> t0
+    RD_T0 RS1_T0 RS2_T2 OR  # t0 | t2 -> t0
+    RD_A0 RS1_T0 RS2_T3 OR  # t0 | t3 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_ld
+    ~0x3003 RD_A1 LUI  # RV_MATCH_LD -> a1
+    !0x3003 RD_A1 RS1_A1 ADDIW
+    $emit_load_common RD_X0 JAL  # goto emit_load_common
+:emit_lbu
+    ~0x4003 RD_A1 LUI  # RV_MATCH_LBU -> a1
+    !0x4003 RD_A1 RS1_A1 ADDIW
+    $emit_load_common RD_X0 JAL  # goto emit_load_common
+:emit_lui
+    !0x37 RD_A1 RS1_X0 ADDI  # RV_MATCH_LUI -> a1
+    $emit_u_common RD_X0 JAL  # goto emit_u_common
+:emit_mv
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !3 RD_T0 RS1_X0 ADDI  # 3 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RS1_SP RS2_A1 SW  # u32 a1 -> 0(sp)
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @4 RS1_SP RS2_A1 SW  # u32 a1 -> 4(sp)
+    RD_T1 RS1_SP LW  # i32 0(sp) -> t1
+    !4 RD_T2 RS1_SP LW  # i32 4(sp) -> t2
+    !7 RD_T1 RS1_T1 SLLI  # t1 << 7 -> t1
+    !0xF RD_T2 RS1_T2 SLLI  # t2 << 15 -> t2
+    !0x13 RD_T3 RS1_X0 ADDI  # RV_MATCH_ADDI -> t3
+    RD_T0 RS1_T3 RS2_T1 OR  # t3 | t1 -> t0
+    RD_A0 RS1_T0 RS2_T2 OR  # t0 | t2 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_ret
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !1 RD_T0 RS1_X0 ADDI  # 1 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    !1 RD_T1 RS1_X0 ADDI  # 1 -> t1
+    !0xF RD_T1 RS1_T1 SLLI  # t1 << 15 -> t1
+    !0x67 RD_T2 RS1_X0 ADDI  # RV_MATCH_JALR -> t2
+    RD_A0 RS1_T2 RS2_T1 OR  # t2 | t1 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_li
+    !-48 RD_SP RS1_SP ADDI  # sp += -48
+    @0x28 RS1_SP RS2_RA SD  # u64 ra -> 40(sp)
+    !3 RD_T0 RS1_X0 ADDI  # 3 -> t0
+    @.Lemit_li_parse RS1_S4 RS2_T0 BEQ  # if s4 == t0 goto .Lemit_li_parse
+    !5 RD_T0 RS1_X0 ADDI  # 5 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+:.Lemit_li_parse
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @0x18 RS1_SP RS2_A1 SW  # u32 a1 -> 24(sp)
+    !3 RD_T0 RS1_X0 ADDI  # 3 -> t0
+    @.Lemit_li_one RS1_S4 RS2_T0 BEQ  # if s4 == t0 goto .Lemit_li_one
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    !3 RD_A1 RS1_X0 ADDI  # 3 -> a1
+    ~eval_expr_range RD_RA AUIPC  # call eval_expr_range
+    !eval_expr_range RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    $.Lemit_li_have_imm RD_X0 JAL  # goto .Lemit_li_have_imm
+:.Lemit_li_one
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    !1 RD_A1 RS1_X0 ADDI  # 1 -> a1
+    ~eval_expr_range RD_RA AUIPC  # call eval_expr_range
+    !eval_expr_range RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+:.Lemit_li_have_imm
+    @0x14 RS1_SP RS2_A1 SW  # u32 a1 -> 20(sp)
+    !-2048 RD_T0 RS1_X0 ADDI  # -2048 -> t0
+    @.Lemit_li_wide RS1_A1 RS2_T0 BLT  # if a1 < t0 goto .Lemit_li_wide
+    ~0x800 RD_T0 LUI  # 2048 -> t0
+    !0x800 RD_T0 RS1_T0 ADDIW
+    @.Lemit_li_wide RS1_A1 RS2_T0 BGE  # if a1 >= t0 goto .Lemit_li_wide
+    !0x18 RD_T1 RS1_SP LW  # i32 24(sp) -> t1
+    !0x14 RD_T2 RS1_SP LW  # i32 20(sp) -> t2
+    ~0xFFF RD_T3 LUI  # 0xfff -> t3
+    !0xFFF RD_T3 RS1_T3 ADDIW
+    RD_T2 RS1_T2 RS2_T3 AND  # t2 & t3 -> t2
+    !7 RD_T1 RS1_T1 SLLI  # t1 << 7 -> t1
+    !0x14 RD_T2 RS1_T2 SLLI  # t2 << 20 -> t2
+    !0x13 RD_T3 RS1_X0 ADDI  # RV_MATCH_ADDI -> t3
+    RD_T0 RS1_T3 RS2_T1 OR  # t3 | t1 -> t0
+    RD_A0 RS1_T0 RS2_T2 OR  # t0 | t2 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    !0x28 RD_RA RS1_SP LD  # u64 40(sp) -> ra
+    !0x30 RD_SP RS1_SP ADDI  # sp += 48
+    RETURN  # return
+:.Lemit_li_wide
+    !0x14 RD_T0 RS1_SP LW  # i32 20(sp) -> t0
+    ~0xFFF RD_T1 LUI  # 0xfff -> t1
+    !0xFFF RD_T1 RS1_T1 ADDIW
+    RD_T2 RS1_T0 RS2_T1 AND  # t0 & t1 -> t2
+    ~0xFFFFF000 RD_T3 LUI  # 0xfffff000 -> t3
+    !0xFFFFF000 RD_T3 RS1_T3 ADDIW
+    RD_T4 RS1_T0 RS2_T3 AND  # t0 & t3 -> t4
+    ~0x800 RD_T5 LUI  # 0x800 -> t5
+    !0x800 RD_T5 RS1_T5 ADDIW
+    @.Lemit_li_hi_ready RS1_T2 RS2_T5 BLTU  # if t2 <u t5 goto .Lemit_li_hi_ready
+    ~0x1000 RD_T5 LUI  # 0x1000 -> t5
+    !0x1000 RD_T5 RS1_T5 ADDIW
+    RD_T4 RS1_T4 RS2_T5 ADD  # t4 + t5 -> t4
+:.Lemit_li_hi_ready
+    !0x18 RD_T1 RS1_SP LW  # i32 24(sp) -> t1
+    !7 RD_T1 RS1_T1 SLLI  # t1 << 7 -> t1
+    !0xC RD_T5 RS1_T4 SRLI  # t4 >> 12 -> t5
+    !0xC RD_T5 RS1_T5 SLLI  # t5 << 12 -> t5
+    !0x37 RD_T6 RS1_X0 ADDI  # RV_MATCH_LUI -> t6
+    RD_T6 RS1_T6 RS2_T1 OR  # t6 | t1 -> t6
+    RD_A0 RS1_T6 RS2_T5 OR  # t6 | t5 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @.Lemit_li_done RS1_T2 RS2_X0 BEQ  # if t2 == zero goto .Lemit_li_done
+    !0x18 RD_T1 RS1_SP LW  # i32 24(sp) -> t1
+    !0x14 RD_T2 RS1_SP LW  # i32 20(sp) -> t2
+    ~0xFFF RD_T3 LUI  # 0xfff -> t3
+    !0xFFF RD_T3 RS1_T3 ADDIW
+    RD_T2 RS1_T2 RS2_T3 AND  # t2 & t3 -> t2
+    !7 RD_T1 RS1_T1 SLLI  # t1 << 7 -> t1
+    !0x18 RD_T4 RS1_SP LW  # i32 24(sp) -> t4
+    !0xF RD_T4 RS1_T4 SLLI  # t4 << 15 -> t4
+    !0x14 RD_T2 RS1_T2 SLLI  # t2 << 20 -> t2
+    ~0x1B RD_T5 LUI  # RV_MATCH_ADDIW -> t5
+    !0x1B RD_T5 RS1_T5 ADDIW
+    RD_T0 RS1_T5 RS2_T1 OR  # t5 | t1 -> t0
+    RD_T0 RS1_T0 RS2_T4 OR  # t0 | t4 -> t0
+    RD_A0 RS1_T0 RS2_T2 OR  # t0 | t2 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+:.Lemit_li_done
+    !0x28 RD_RA RS1_SP LD  # u64 40(sp) -> ra
+    !0x30 RD_SP RS1_SP ADDI  # sp += 48
+    RETURN  # return
+:emit_la
+    !-48 RD_SP RS1_SP ADDI  # sp += -48
+    @0x28 RS1_SP RS2_RA SD  # u64 ra -> 40(sp)
+    !3 RD_T0 RS1_X0 ADDI  # 3 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @0x18 RS1_SP RS2_A1 SW  # u32 a1 -> 24(sp)
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~lookup_label RD_RA AUIPC  # call lookup_label
+    !lookup_label RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RD_T0 RS1_A1 RS2_S3 SUB  # a1 - s3 -> t0
+    ~0xFFF RD_T1 LUI  # 0xfff -> t1
+    !0xFFF RD_T1 RS1_T1 ADDIW
+    RD_T2 RS1_T0 RS2_T1 AND  # t0 & t1 -> t2
+    ~0xFFFFF000 RD_T3 LUI  # 0xfffff000 -> t3
+    !0xFFFFF000 RD_T3 RS1_T3 ADDIW
+    RD_T4 RS1_T0 RS2_T3 AND  # t0 & t3 -> t4
+    ~0x800 RD_T5 LUI  # 0x800 -> t5
+    !0x800 RD_T5 RS1_T5 ADDIW
+    @.Lemit_la_hi_ready RS1_T2 RS2_T5 BLTU  # if t2 <u t5 goto .Lemit_la_hi_ready
+    ~0x1000 RD_T5 LUI  # 0x1000 -> t5
+    !0x1000 RD_T5 RS1_T5 ADDIW
+    RD_T4 RS1_T4 RS2_T5 ADD  # t4 + t5 -> t4
+:.Lemit_la_hi_ready
+    !0x18 RD_T1 RS1_SP LW  # i32 24(sp) -> t1
+    !7 RD_T1 RS1_T1 SLLI  # t1 << 7 -> t1
+    !0xC RD_T5 RS1_T4 SRLI  # t4 >> 12 -> t5
+    !0xC RD_T5 RS1_T5 SLLI  # t5 << 12 -> t5
+    !0x17 RD_T6 RS1_X0 ADDI  # RV_MATCH_AUIPC -> t6
+    RD_T6 RS1_T6 RS2_T1 OR  # t6 | t1 -> t6
+    RD_A0 RS1_T6 RS2_T5 OR  # t6 | t5 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    !0x18 RD_T1 RS1_SP LW  # i32 24(sp) -> t1
+    !7 RD_T1 RS1_T1 SLLI  # t1 << 7 -> t1
+    !0x18 RD_T3 RS1_SP LW  # i32 24(sp) -> t3
+    !0xF RD_T3 RS1_T3 SLLI  # t3 << 15 -> t3
+    ~0xFFF RD_T4 LUI  # 0xfff -> t4
+    !0xFFF RD_T4 RS1_T4 ADDIW
+    RD_T2 RS1_T2 RS2_T4 AND  # t2 & t4 -> t2
+    !0x14 RD_T2 RS1_T2 SLLI  # t2 << 20 -> t2
+    !0x13 RD_T5 RS1_X0 ADDI  # RV_MATCH_ADDI -> t5
+    RD_T0 RS1_T5 RS2_T1 OR  # t5 | t1 -> t0
+    RD_T0 RS1_T0 RS2_T3 OR  # t0 | t3 -> t0
+    RD_A0 RS1_T0 RS2_T2 OR  # t0 | t2 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    !0x28 RD_RA RS1_SP LD  # u64 40(sp) -> ra
+    !0x30 RD_SP RS1_SP ADDI  # sp += 48
+    RETURN  # return
+:emit_i_common
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !4 RD_T0 RS1_X0 ADDI  # 4 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    RD_S6 RS1_A1 MV  # a1 -> s6
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RS1_SP RS2_A1 SW  # u32 a1 -> 0(sp)
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @4 RS1_SP RS2_A1 SW  # u32 a1 -> 4(sp)
+    !3 RD_A0 RS1_X0 ADDI  # 3 -> a0
+    !1 RD_A1 RS1_X0 ADDI  # 1 -> a1
+    ~eval_expr_range RD_RA AUIPC  # call eval_expr_range
+    !eval_expr_range RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @8 RS1_SP RS2_A1 SW  # u32 a1 -> 8(sp)
+    RD_T1 RS1_SP LW  # i32 0(sp) -> t1
+    !4 RD_T2 RS1_SP LW  # i32 4(sp) -> t2
+    !8 RD_T3 RS1_SP LW  # i32 8(sp) -> t3
+    ~0xFFF RD_T4 LUI  # 0xfff -> t4
+    !0xFFF RD_T4 RS1_T4 ADDIW
+    RD_T3 RS1_T3 RS2_T4 AND  # t3 & t4 -> t3
+    !7 RD_T1 RS1_T1 SLLI  # t1 << 7 -> t1
+    !0xF RD_T2 RS1_T2 SLLI  # t2 << 15 -> t2
+    !0x14 RD_T3 RS1_T3 SLLI  # t3 << 20 -> t3
+    RD_T0 RS1_S6 RS2_T1 OR  # s6 | t1 -> t0
+    RD_T0 RS1_T0 RS2_T2 OR  # t0 | t2 -> t0
+    RD_A0 RS1_T0 RS2_T3 OR  # t0 | t3 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_load_common
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !4 RD_T0 RS1_X0 ADDI  # 4 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    RD_S6 RS1_A1 MV  # a1 -> s6
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RS1_SP RS2_A1 SW  # u32 a1 -> 0(sp)
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_value RD_RA AUIPC  # call parse_value
+    !parse_value RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @8 RS1_SP RS2_A1 SW  # u32 a1 -> 8(sp)
+    !3 RD_A0 RS1_X0 ADDI  # 3 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @4 RS1_SP RS2_A1 SW  # u32 a1 -> 4(sp)
+    RD_T1 RS1_SP LW  # i32 0(sp) -> t1
+    !4 RD_T2 RS1_SP LW  # i32 4(sp) -> t2
+    !8 RD_T3 RS1_SP LW  # i32 8(sp) -> t3
+    ~0xFFF RD_T4 LUI  # 0xfff -> t4
+    !0xFFF RD_T4 RS1_T4 ADDIW
+    RD_T3 RS1_T3 RS2_T4 AND  # t3 & t4 -> t3
+    !7 RD_T1 RS1_T1 SLLI  # t1 << 7 -> t1
+    !0xF RD_T2 RS1_T2 SLLI  # t2 << 15 -> t2
+    !0x14 RD_T3 RS1_T3 SLLI  # t3 << 20 -> t3
+    RD_T0 RS1_S6 RS2_T1 OR  # s6 | t1 -> t0
+    RD_T0 RS1_T0 RS2_T2 OR  # t0 | t2 -> t0
+    RD_A0 RS1_T0 RS2_T3 OR  # t0 | t3 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_sd
+    ~0x3023 RD_A1 LUI  # RV_MATCH_SD -> a1
+    !0x3023 RD_A1 RS1_A1 ADDIW
+    $emit_s_common RD_X0 JAL  # goto emit_s_common
+:emit_sb
+    !0x23 RD_A1 RS1_X0 ADDI  # RV_MATCH_SB -> a1
+    $emit_s_common RD_X0 JAL  # goto emit_s_common
+:emit_s_common
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !4 RD_T0 RS1_X0 ADDI  # 4 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    RD_S6 RS1_A1 MV  # a1 -> s6
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @4 RS1_SP RS2_A1 SW  # u32 a1 -> 4(sp)
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_value RD_RA AUIPC  # call parse_value
+    !parse_value RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @8 RS1_SP RS2_A1 SW  # u32 a1 -> 8(sp)
+    !3 RD_A0 RS1_X0 ADDI  # 3 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RS1_SP RS2_A1 SW  # u32 a1 -> 0(sp)
+    RD_T1 RS1_SP LW  # i32 0(sp) -> t1
+    !4 RD_T2 RS1_SP LW  # i32 4(sp) -> t2
+    !8 RD_T3 RS1_SP LW  # i32 8(sp) -> t3
+    !5 RD_T4 RS1_T3 SRLI  # t3 >> 5 -> t4
+    !0x7F RD_T4 RS1_T4 ANDI  # t4 & 0x7f -> t4
+    !0x19 RD_T4 RS1_T4 SLLI  # t4 << 25 -> t4
+    !0x1F RD_T5 RS1_T3 ANDI  # t3 & 0x1f -> t5
+    !7 RD_T5 RS1_T5 SLLI  # t5 << 7 -> t5
+    !0xF RD_T1 RS1_T1 SLLI  # t1 << 15 -> t1
+    !0x14 RD_T2 RS1_T2 SLLI  # t2 << 20 -> t2
+    RD_T0 RS1_S6 RS2_T4 OR  # s6 | t4 -> t0
+    RD_T0 RS1_T0 RS2_T5 OR  # t0 | t5 -> t0
+    RD_T0 RS1_T0 RS2_T1 OR  # t0 | t1 -> t0
+    RD_A0 RS1_T0 RS2_T2 OR  # t0 | t2 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_beq
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !4 RD_T0 RS1_X0 ADDI  # 4 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    !0x63 RD_S6 RS1_X0 ADDI  # RV_MATCH_BEQ -> s6
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RS1_SP RS2_A1 SW  # u32 a1 -> 0(sp)
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @4 RS1_SP RS2_A1 SW  # u32 a1 -> 4(sp)
+    !3 RD_A0 RS1_X0 ADDI  # 3 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~lookup_label RD_RA AUIPC  # call lookup_label
+    !lookup_label RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RD_T1 RS1_SP LW  # i32 0(sp) -> t1
+    !4 RD_T2 RS1_SP LW  # i32 4(sp) -> t2
+    RD_T3 RS1_A1 RS2_S3 SUB  # a1 - s3 -> t3
+    !0xC RD_T4 RS1_T3 SRLI  # t3 >> 12 -> t4
+    !1 RD_T4 RS1_T4 ANDI  # t4 & 1 -> t4
+    !0x1F RD_T4 RS1_T4 SLLI  # t4 << 31 -> t4
+    !5 RD_T5 RS1_T3 SRLI  # t3 >> 5 -> t5
+    !0x3F RD_T5 RS1_T5 ANDI  # t5 & 0x3f -> t5
+    !0x19 RD_T5 RS1_T5 SLLI  # t5 << 25 -> t5
+    !1 RD_T6 RS1_T3 SRLI  # t3 >> 1 -> t6
+    !0xF RD_T6 RS1_T6 ANDI  # t6 & 0xf -> t6
+    !8 RD_T6 RS1_T6 SLLI  # t6 << 8 -> t6
+    !0xB RD_A2 RS1_T3 SRLI  # t3 >> 11 -> a2
+    !1 RD_A2 RS1_A2 ANDI  # a2 & 1 -> a2
+    !7 RD_A2 RS1_A2 SLLI  # a2 << 7 -> a2
+    !0xF RD_T1 RS1_T1 SLLI  # t1 << 15 -> t1
+    !0x14 RD_T2 RS1_T2 SLLI  # t2 << 20 -> t2
+    RD_T0 RS1_S6 RS2_T4 OR  # s6 | t4 -> t0
+    RD_T0 RS1_T0 RS2_T5 OR  # t0 | t5 -> t0
+    RD_T0 RS1_T0 RS2_T6 OR  # t0 | t6 -> t0
+    RD_T0 RS1_T0 RS2_A2 OR  # t0 | a2 -> t0
+    RD_T0 RS1_T0 RS2_T1 OR  # t0 | t1 -> t0
+    RD_A0 RS1_T0 RS2_T2 OR  # t0 | t2 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_jal
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !3 RD_T0 RS1_X0 ADDI  # 3 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RS1_SP RS2_A1 SW  # u32 a1 -> 0(sp)
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~lookup_label RD_RA AUIPC  # call lookup_label
+    !lookup_label RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RD_T1 RS1_SP LW  # i32 0(sp) -> t1
+    RD_T2 RS1_A1 RS2_S3 SUB  # a1 - s3 -> t2
+    !0x14 RD_T3 RS1_T2 SRLI  # t2 >> 20 -> t3
+    !1 RD_T3 RS1_T3 ANDI  # t3 & 1 -> t3
+    !0x1F RD_T3 RS1_T3 SLLI  # t3 << 31 -> t3
+    !1 RD_T4 RS1_T2 SRLI  # t2 >> 1 -> t4
+    !0x3FF RD_T4 RS1_T4 ANDI  # t4 & 0x3ff -> t4
+    !0x15 RD_T4 RS1_T4 SLLI  # t4 << 21 -> t4
+    !0xB RD_T5 RS1_T2 SRLI  # t2 >> 11 -> t5
+    !1 RD_T5 RS1_T5 ANDI  # t5 & 1 -> t5
+    !0x14 RD_T5 RS1_T5 SLLI  # t5 << 20 -> t5
+    !0xC RD_T6 RS1_T2 SRLI  # t2 >> 12 -> t6
+    !0xFF RD_T6 RS1_T6 ANDI  # t6 & 0xff -> t6
+    !0xC RD_T6 RS1_T6 SLLI  # t6 << 12 -> t6
+    !7 RD_T1 RS1_T1 SLLI  # t1 << 7 -> t1
+    RD_T0 RS1_T1 RS2_T3 OR  # t1 | t3 -> t0
+    RD_T0 RS1_T0 RS2_T4 OR  # t0 | t4 -> t0
+    RD_T0 RS1_T0 RS2_T5 OR  # t0 | t5 -> t0
+    RD_T0 RS1_T0 RS2_T6 OR  # t0 | t6 -> t0
+    !0x6F RD_T1 RS1_X0 ADDI  # RV_MATCH_JAL -> t1
+    RD_A0 RS1_T0 RS2_T1 OR  # t0 | t1 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_u_common
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !3 RD_T0 RS1_X0 ADDI  # 3 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    RD_S6 RS1_A1 MV  # a1 -> s6
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RS1_SP RS2_A1 SW  # u32 a1 -> 0(sp)
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_value RD_RA AUIPC  # call parse_value
+    !parse_value RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @4 RS1_SP RS2_A1 SW  # u32 a1 -> 4(sp)
+    RD_T1 RS1_SP LW  # i32 0(sp) -> t1
+    !4 RD_T2 RS1_SP LW  # i32 4(sp) -> t2
+    !7 RD_T1 RS1_T1 SLLI  # t1 << 7 -> t1
+    !0xC RD_T2 RS1_T2 SLLI  # t2 << 12 -> t2
+    RD_T0 RS1_S6 RS2_T1 OR  # s6 | t1 -> t0
+    RD_A0 RS1_T0 RS2_T2 OR  # t0 | t2 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_fixed
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !1 RD_T0 RS1_X0 ADDI  # 1 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    RD_A0 RS1_A1 MV  # a1 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_b_common
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !4 RD_T0 RS1_X0 ADDI  # 4 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    RD_S6 RS1_A1 MV  # a1 -> s6
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RS1_SP RS2_A1 SW  # u32 a1 -> 0(sp)
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @4 RS1_SP RS2_A1 SW  # u32 a1 -> 4(sp)
+    !3 RD_A0 RS1_X0 ADDI  # 3 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~lookup_label RD_RA AUIPC  # call lookup_label
+    !lookup_label RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RD_T1 RS1_SP LW  # i32 0(sp) -> t1
+    !4 RD_T2 RS1_SP LW  # i32 4(sp) -> t2
+    $emit_b_with_regs RD_X0 JAL  # goto emit_b_with_regs
+:emit_b_zero_rs
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !3 RD_T0 RS1_X0 ADDI  # 3 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    RD_S6 RS1_A1 MV  # a1 -> s6
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RS1_SP RS2_A1 SW  # u32 a1 -> 0(sp)
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~lookup_label RD_RA AUIPC  # call lookup_label
+    !lookup_label RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RD_T1 RS1_SP LW  # i32 0(sp) -> t1
+    RD_T2 RS1_X0 ADDI  # 0 -> t2
+    $emit_b_with_regs RD_X0 JAL  # goto emit_b_with_regs
+:emit_b_zero_left
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !3 RD_T0 RS1_X0 ADDI  # 3 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    RD_S6 RS1_A1 MV  # a1 -> s6
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @4 RS1_SP RS2_A1 SW  # u32 a1 -> 4(sp)
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~lookup_label RD_RA AUIPC  # call lookup_label
+    !lookup_label RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RD_T1 RS1_X0 ADDI  # 0 -> t1
+    !4 RD_T2 RS1_SP LW  # i32 4(sp) -> t2
+    $emit_b_with_regs RD_X0 JAL  # goto emit_b_with_regs
+:emit_b_swap
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !4 RD_T0 RS1_X0 ADDI  # 4 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    RD_S6 RS1_A1 MV  # a1 -> s6
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @4 RS1_SP RS2_A1 SW  # u32 a1 -> 4(sp)
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RS1_SP RS2_A1 SW  # u32 a1 -> 0(sp)
+    !3 RD_A0 RS1_X0 ADDI  # 3 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~lookup_label RD_RA AUIPC  # call lookup_label
+    !lookup_label RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RD_T1 RS1_SP LW  # i32 0(sp) -> t1
+    !4 RD_T2 RS1_SP LW  # i32 4(sp) -> t2
+    $emit_b_with_regs RD_X0 JAL  # goto emit_b_with_regs
+:emit_b_with_regs
+    RD_T3 RS1_A1 RS2_S3 SUB  # a1 - s3 -> t3
+    !0xC RD_T4 RS1_T3 SRLI  # t3 >> 12 -> t4
+    !1 RD_T4 RS1_T4 ANDI  # t4 & 1 -> t4
+    !0x1F RD_T4 RS1_T4 SLLI  # t4 << 31 -> t4
+    !5 RD_T5 RS1_T3 SRLI  # t3 >> 5 -> t5
+    !0x3F RD_T5 RS1_T5 ANDI  # t5 & 0x3f -> t5
+    !0x19 RD_T5 RS1_T5 SLLI  # t5 << 25 -> t5
+    !1 RD_T6 RS1_T3 SRLI  # t3 >> 1 -> t6
+    !0xF RD_T6 RS1_T6 ANDI  # t6 & 0xf -> t6
+    !8 RD_T6 RS1_T6 SLLI  # t6 << 8 -> t6
+    !0xB RD_A2 RS1_T3 SRLI  # t3 >> 11 -> a2
+    !1 RD_A2 RS1_A2 ANDI  # a2 & 1 -> a2
+    !7 RD_A2 RS1_A2 SLLI  # a2 << 7 -> a2
+    !0xF RD_T1 RS1_T1 SLLI  # t1 << 15 -> t1
+    !0x14 RD_T2 RS1_T2 SLLI  # t2 << 20 -> t2
+    RD_T0 RS1_S6 RS2_T4 OR  # s6 | t4 -> t0
+    RD_T0 RS1_T0 RS2_T5 OR  # t0 | t5 -> t0
+    RD_T0 RS1_T0 RS2_T6 OR  # t0 | t6 -> t0
+    RD_T0 RS1_T0 RS2_A2 OR  # t0 | a2 -> t0
+    RD_T0 RS1_T0 RS2_T1 OR  # t0 | t1 -> t0
+    RD_A0 RS1_T0 RS2_T2 OR  # t0 | t2 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_j
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !2 RD_T0 RS1_X0 ADDI  # 2 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    RD_T1 RS1_X0 ADDI  # 0 -> t1
+    RS1_SP RS2_T1 SW  # u32 t1 -> 0(sp)
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~lookup_label RD_RA AUIPC  # call lookup_label
+    !lookup_label RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RD_T1 RS1_SP LW  # i32 0(sp) -> t1
+    RD_T2 RS1_A1 RS2_S3 SUB  # a1 - s3 -> t2
+    $emit_j_with_rd RD_X0 JAL  # goto emit_j_with_rd
+:emit_jr
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !2 RD_T0 RS1_X0 ADDI  # 2 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    !0x67 RD_A1 RS1_X0 ADDI  # RV_MATCH_JALR -> a1
+    RD_S6 RS1_A1 MV  # a1 -> s6
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @4 RS1_SP RS2_A1 SW  # u32 a1 -> 4(sp)
+    RD_T1 RS1_X0 ADDI  # 0 -> t1
+    RS1_SP RS2_T1 SW  # u32 t1 -> 0(sp)
+    @8 RS1_SP RS2_T1 SW  # u32 t1 -> 8(sp)
+    RD_T1 RS1_SP LW  # i32 0(sp) -> t1
+    !4 RD_T2 RS1_SP LW  # i32 4(sp) -> t2
+    !8 RD_T3 RS1_SP LW  # i32 8(sp) -> t3
+    ~0xFFF RD_T4 LUI  # 0xfff -> t4
+    !0xFFF RD_T4 RS1_T4 ADDIW
+    RD_T3 RS1_T3 RS2_T4 AND  # t3 & t4 -> t3
+    !7 RD_T1 RS1_T1 SLLI  # t1 << 7 -> t1
+    !0xF RD_T2 RS1_T2 SLLI  # t2 << 15 -> t2
+    !0x14 RD_T3 RS1_T3 SLLI  # t3 << 20 -> t3
+    RD_T0 RS1_S6 RS2_T1 OR  # s6 | t1 -> t0
+    RD_T0 RS1_T0 RS2_T2 OR  # t0 | t2 -> t0
+    RD_A0 RS1_T0 RS2_T3 OR  # t0 | t3 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_call_like
+    !-48 RD_SP RS1_SP ADDI  # sp += -48
+    @0x28 RS1_SP RS2_RA SD  # u64 ra -> 40(sp)
+    @0x18 RS1_SP RS2_A0 SW  # u32 a0 -> 24(sp)
+    @0x14 RS1_SP RS2_A1 SW  # u32 a1 -> 20(sp)
+    @0x10 RS1_SP RS2_A2 SW  # u32 a2 -> 16(sp)
+    !2 RD_T0 RS1_X0 ADDI  # 2 -> t0
+    @.Lemit_call_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_call_fail
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~lookup_label RD_RA AUIPC  # call lookup_label
+    !lookup_label RD_RA RS1_RA JALR
+    @.Lemit_call_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_call_fail
+    @0xC RS1_SP RS2_A1 SW  # u32 a1 -> 12(sp)
+    !0xC RD_T0 RS1_SP LW  # i32 12(sp) -> t0
+    RD_T0 RS1_T0 RS2_S3 SUB  # t0 - s3 -> t0
+    ~0xFFF RD_T1 LUI  # 0xfff -> t1
+    !0xFFF RD_T1 RS1_T1 ADDIW
+    RD_T2 RS1_T0 RS2_T1 AND  # t0 & t1 -> t2
+    @8 RS1_SP RS2_T2 SW  # u32 t2 -> 8(sp)
+    ~0xFFFFF000 RD_T3 LUI  # 0xfffff000 -> t3
+    !0xFFFFF000 RD_T3 RS1_T3 ADDIW
+    RD_T4 RS1_T0 RS2_T3 AND  # t0 & t3 -> t4
+    ~0x800 RD_T5 LUI  # 0x800 -> t5
+    !0x800 RD_T5 RS1_T5 ADDIW
+    @.Lemit_call_hi_ready RS1_T2 RS2_T5 BLTU  # if t2 <u t5 goto .Lemit_call_hi_ready
+    ~0x1000 RD_T5 LUI  # 0x1000 -> t5
+    !0x1000 RD_T5 RS1_T5 ADDIW
+    RD_T4 RS1_T4 RS2_T5 ADD  # t4 + t5 -> t4
+:.Lemit_call_hi_ready
+    !0x14 RD_T1 RS1_SP LW  # i32 20(sp) -> t1
+    !7 RD_T1 RS1_T1 SLLI  # t1 << 7 -> t1
+    !0xC RD_T5 RS1_T4 SRLI  # t4 >> 12 -> t5
+    !0xC RD_T5 RS1_T5 SLLI  # t5 << 12 -> t5
+    !0x17 RD_T6 RS1_X0 ADDI  # RV_MATCH_AUIPC -> t6
+    RD_T6 RS1_T6 RS2_T1 OR  # t6 | t1 -> t6
+    RD_A0 RS1_T6 RS2_T5 OR  # t6 | t5 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    @.Lemit_call_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_call_fail
+    !0x18 RD_T1 RS1_SP LW  # i32 24(sp) -> t1
+    !7 RD_T1 RS1_T1 SLLI  # t1 << 7 -> t1
+    !0x10 RD_T3 RS1_SP LW  # i32 16(sp) -> t3
+    !0xF RD_T3 RS1_T3 SLLI  # t3 << 15 -> t3
+    !8 RD_T2 RS1_SP LW  # i32 8(sp) -> t2
+    ~0xFFF RD_T4 LUI  # 0xfff -> t4
+    !0xFFF RD_T4 RS1_T4 ADDIW
+    RD_T2 RS1_T2 RS2_T4 AND  # t2 & t4 -> t2
+    !0x14 RD_T2 RS1_T2 SLLI  # t2 << 20 -> t2
+    !0x67 RD_T0 RS1_X0 ADDI  # RV_MATCH_JALR -> t0
+    RD_T0 RS1_T0 RS2_T1 OR  # t0 | t1 -> t0
+    RD_T0 RS1_T0 RS2_T3 OR  # t0 | t3 -> t0
+    RD_A0 RS1_T0 RS2_T2 OR  # t0 | t2 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    $.Lemit_call_done RD_X0 JAL  # goto .Lemit_call_done
+:.Lemit_call_fail
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+:.Lemit_call_done
+    !0x28 RD_RA RS1_SP LD  # u64 40(sp) -> ra
+    !0x30 RD_SP RS1_SP ADDI  # sp += 48
+    RETURN  # return
+:emit_j_with_rd
+    !0x14 RD_T3 RS1_T2 SRLI  # t2 >> 20 -> t3
+    !1 RD_T3 RS1_T3 ANDI  # t3 & 1 -> t3
+    !0x1F RD_T3 RS1_T3 SLLI  # t3 << 31 -> t3
+    !1 RD_T4 RS1_T2 SRLI  # t2 >> 1 -> t4
+    !0x3FF RD_T4 RS1_T4 ANDI  # t4 & 0x3ff -> t4
+    !0x15 RD_T4 RS1_T4 SLLI  # t4 << 21 -> t4
+    !0xB RD_T5 RS1_T2 SRLI  # t2 >> 11 -> t5
+    !1 RD_T5 RS1_T5 ANDI  # t5 & 1 -> t5
+    !0x14 RD_T5 RS1_T5 SLLI  # t5 << 20 -> t5
+    !0xC RD_T6 RS1_T2 SRLI  # t2 >> 12 -> t6
+    !0xFF RD_T6 RS1_T6 ANDI  # t6 & 0xff -> t6
+    !0xC RD_T6 RS1_T6 SLLI  # t6 << 12 -> t6
+    !7 RD_T1 RS1_T1 SLLI  # t1 << 7 -> t1
+    RD_T0 RS1_T1 RS2_T3 OR  # t1 | t3 -> t0
+    RD_T0 RS1_T0 RS2_T4 OR  # t0 | t4 -> t0
+    RD_T0 RS1_T0 RS2_T5 OR  # t0 | t5 -> t0
+    RD_T0 RS1_T0 RS2_T6 OR  # t0 | t6 -> t0
+    !0x6F RD_T1 RS1_X0 ADDI  # RV_MATCH_JAL -> t1
+    RD_A0 RS1_T0 RS2_T1 OR  # t0 | t1 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_zero_left_r
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !3 RD_T0 RS1_X0 ADDI  # 3 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    RD_S6 RS1_A1 MV  # a1 -> s6
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RS1_SP RS2_A1 SW  # u32 a1 -> 0(sp)
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @8 RS1_SP RS2_A1 SW  # u32 a1 -> 8(sp)
+    RD_T0 RS1_X0 ADDI  # 0 -> t0
+    @4 RS1_SP RS2_T0 SW  # u32 t0 -> 4(sp)
+    RD_T1 RS1_SP LW  # i32 0(sp) -> t1
+    !4 RD_T2 RS1_SP LW  # i32 4(sp) -> t2
+    !8 RD_T3 RS1_SP LW  # i32 8(sp) -> t3
+    !7 RD_T1 RS1_T1 SLLI  # t1 << 7 -> t1
+    !0xF RD_T2 RS1_T2 SLLI  # t2 << 15 -> t2
+    !0x14 RD_T3 RS1_T3 SLLI  # t3 << 20 -> t3
+    RD_T0 RS1_S6 RS2_T1 OR  # s6 | t1 -> t0
+    RD_T0 RS1_T0 RS2_T2 OR  # t0 | t2 -> t0
+    RD_A0 RS1_T0 RS2_T3 OR  # t0 | t3 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_zero_right_r
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !3 RD_T0 RS1_X0 ADDI  # 3 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    RD_S6 RS1_A1 MV  # a1 -> s6
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RS1_SP RS2_A1 SW  # u32 a1 -> 0(sp)
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @4 RS1_SP RS2_A1 SW  # u32 a1 -> 4(sp)
+    RD_T0 RS1_X0 ADDI  # 0 -> t0
+    @8 RS1_SP RS2_T0 SW  # u32 t0 -> 8(sp)
+    RD_T1 RS1_SP LW  # i32 0(sp) -> t1
+    !4 RD_T2 RS1_SP LW  # i32 4(sp) -> t2
+    !8 RD_T3 RS1_SP LW  # i32 8(sp) -> t3
+    !7 RD_T1 RS1_T1 SLLI  # t1 << 7 -> t1
+    !0xF RD_T2 RS1_T2 SLLI  # t2 << 15 -> t2
+    !0x14 RD_T3 RS1_T3 SLLI  # t3 << 20 -> t3
+    RD_T0 RS1_S6 RS2_T1 OR  # s6 | t1 -> t0
+    RD_T0 RS1_T0 RS2_T2 OR  # t0 | t2 -> t0
+    RD_A0 RS1_T0 RS2_T3 OR  # t0 | t3 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_not
+    ~0x4013 RD_A1 LUI  # RV_MATCH_XORI -> a1
+    !0x4013 RD_A1 RS1_A1 ADDIW
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !3 RD_T0 RS1_X0 ADDI  # 3 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    RD_S6 RS1_A1 MV  # a1 -> s6
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RS1_SP RS2_A1 SW  # u32 a1 -> 0(sp)
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @4 RS1_SP RS2_A1 SW  # u32 a1 -> 4(sp)
+    !-1 RD_T0 RS1_X0 ADDI  # -1 -> t0
+    @8 RS1_SP RS2_T0 SW  # u32 t0 -> 8(sp)
+    RD_T1 RS1_SP LW  # i32 0(sp) -> t1
+    !4 RD_T2 RS1_SP LW  # i32 4(sp) -> t2
+    !8 RD_T3 RS1_SP LW  # i32 8(sp) -> t3
+    ~0xFFF RD_T4 LUI  # 0xfff -> t4
+    !0xFFF RD_T4 RS1_T4 ADDIW
+    RD_T3 RS1_T3 RS2_T4 AND  # t3 & t4 -> t3
+    !7 RD_T1 RS1_T1 SLLI  # t1 << 7 -> t1
+    !0xF RD_T2 RS1_T2 SLLI  # t2 << 15 -> t2
+    !0x14 RD_T3 RS1_T3 SLLI  # t3 << 20 -> t3
+    RD_T0 RS1_S6 RS2_T1 OR  # s6 | t1 -> t0
+    RD_T0 RS1_T0 RS2_T2 OR  # t0 | t2 -> t0
+    RD_A0 RS1_T0 RS2_T3 OR  # t0 | t3 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_seqz
+    ~0x3013 RD_A1 LUI  # RV_MATCH_SLTIU -> a1
+    !0x3013 RD_A1 RS1_A1 ADDIW
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !3 RD_T0 RS1_X0 ADDI  # 3 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    RD_S6 RS1_A1 MV  # a1 -> s6
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RS1_SP RS2_A1 SW  # u32 a1 -> 0(sp)
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_register RD_RA AUIPC  # call parse_register
+    !parse_register RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    @4 RS1_SP RS2_A1 SW  # u32 a1 -> 4(sp)
+    !1 RD_T0 RS1_X0 ADDI  # 1 -> t0
+    @8 RS1_SP RS2_T0 SW  # u32 t0 -> 8(sp)
+    RD_T1 RS1_SP LW  # i32 0(sp) -> t1
+    !4 RD_T2 RS1_SP LW  # i32 4(sp) -> t2
+    !8 RD_T3 RS1_SP LW  # i32 8(sp) -> t3
+    ~0xFFF RD_T4 LUI  # 0xfff -> t4
+    !0xFFF RD_T4 RS1_T4 ADDIW
+    RD_T3 RS1_T3 RS2_T4 AND  # t3 & t4 -> t3
+    !7 RD_T1 RS1_T1 SLLI  # t1 << 7 -> t1
+    !0xF RD_T2 RS1_T2 SLLI  # t2 << 15 -> t2
+    !0x14 RD_T3 RS1_T3 SLLI  # t3 << 20 -> t3
+    RD_T0 RS1_S6 RS2_T1 OR  # s6 | t1 -> t0
+    RD_T0 RS1_T0 RS2_T2 OR  # t0 | t2 -> t0
+    RD_A0 RS1_T0 RS2_T3 OR  # t0 | t3 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:.Lemit_fail
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_dot_byte
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !2 RD_T0 RS1_X0 ADDI  # 2 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BLTU  # if s4 <u t0 goto .Lemit_fail
+    !1 RD_T1 RS1_X0 ADDI  # 1 -> t1
+    @0x10 RS1_SP RS2_T1 SW  # u32 t1 -> 16(sp)
+:.Lemit_dot_byte_loop
+    !0x10 RD_T1 RS1_SP LW  # i32 16(sp) -> t1
+    @.Lemit_dot_byte_done RS1_T1 RS2_S4 BGEU  # if t1 >=u s4 goto .Lemit_dot_byte_done
+    RD_A0 RS1_T1 MV  # t1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_value RD_RA AUIPC  # call parse_value
+    !parse_value RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    !0xFF RD_A0 RS1_A1 ANDI  # a1 & 0xff -> a0
+    ~emit_byte RD_RA AUIPC  # call emit_byte
+    !emit_byte RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    !0x10 RD_T1 RS1_SP LW  # i32 16(sp) -> t1
+    !1 RD_T1 RS1_T1 ADDI  # t1 + 1 -> t1
+    @0x10 RS1_SP RS2_T1 SW  # u32 t1 -> 16(sp)
+    $.Lemit_dot_byte_loop RD_X0 JAL  # goto .Lemit_dot_byte_loop
+:.Lemit_dot_byte_done
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_dot_word
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !2 RD_T0 RS1_X0 ADDI  # 2 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BLTU  # if s4 <u t0 goto .Lemit_fail
+    !2 RD_T0 RS1_X0 ADDI  # 2 -> t0
+    @.Lemit_dot_word_single RS1_S4 RS2_T0 BEQ  # if s4 == t0 goto .Lemit_dot_word_single
+    !4 RD_T0 RS1_X0 ADDI  # 4 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    !2 RD_A0 RS1_X0 ADDI  # 2 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~str_minus RD_A1 AUIPC  # addr str_minus -> a1
+    !str_minus RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~lookup_label RD_RA AUIPC  # call lookup_label
+    !lookup_label RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RS1_SP RS2_A1 SW  # u32 a1 -> 0(sp)
+    !3 RD_A0 RS1_X0 ADDI  # 3 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~str_dot RD_A1 AUIPC  # addr str_dot -> a1
+    !str_dot RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lemit_dot_word_here RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lemit_dot_word_here
+    !3 RD_A0 RS1_X0 ADDI  # 3 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~lookup_label RD_RA AUIPC  # call lookup_label
+    !lookup_label RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    RD_T0 RS1_SP LW  # i32 0(sp) -> t0
+    RD_A0 RS1_T0 RS2_A1 SUB  # t0 - a1 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    $.Lemit_dot_word_done RD_X0 JAL  # goto .Lemit_dot_word_done
+:.Lemit_dot_word_here
+    RD_T0 RS1_SP LW  # i32 0(sp) -> t0
+    RD_A0 RS1_T0 RS2_S3 SUB  # t0 - s3 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+    $.Lemit_dot_word_done RD_X0 JAL  # goto .Lemit_dot_word_done
+:.Lemit_dot_word_single
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_value RD_RA AUIPC  # call parse_value
+    !parse_value RD_RA RS1_RA JALR
+    @.Lemit_dot_word_emit RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lemit_dot_word_emit
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~lookup_label RD_RA AUIPC  # call lookup_label
+    !lookup_label RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+:.Lemit_dot_word_emit
+    RD_A0 RS1_A1 MV  # a1 -> a0
+    ~emit_word RD_RA AUIPC  # call emit_word
+    !emit_word RD_RA RS1_RA JALR
+:.Lemit_dot_word_done
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_dot_dword
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !2 RD_T0 RS1_X0 ADDI  # 2 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BLTU  # if s4 <u t0 goto .Lemit_fail
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_value RD_RA AUIPC  # call parse_value
+    !parse_value RD_RA RS1_RA JALR
+    @.Lemit_dot_dword_emit RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lemit_dot_dword_emit
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~lookup_label RD_RA AUIPC  # call lookup_label
+    !lookup_label RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+:.Lemit_dot_dword_emit
+    RD_A0 RS1_A1 MV  # a1 -> a0
+    ~emit_dword RD_RA AUIPC  # call emit_dword
+    !emit_dword RD_RA RS1_RA JALR
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_dot_string
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !2 RD_T0 RS1_X0 ADDI  # 2 -> t0
+    @.Lemit_fail RS1_S4 RS2_T0 BNE  # if s4 != t0 goto .Lemit_fail
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    RD_T1 RS1_A0 MV  # a0 -> t1
+    @0x10 RS1_SP RS2_T1 SD  # u64 t1 -> 16(sp)
+:.Lemit_dot_string_loop
+    !0x10 RD_T1 RS1_SP LD  # u64 16(sp) -> t1
+    RD_T0 RS1_T1 LBU  # u8 0(t1) -> t0
+    @.Lemit_dot_string_done RS1_T0 RS2_X0 BEQ  # if t0 == zero goto .Lemit_dot_string_done
+    RD_A0 RS1_T0 MV  # t0 -> a0
+    ~emit_byte RD_RA AUIPC  # call emit_byte
+    !emit_byte RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    !0x10 RD_T1 RS1_SP LD  # u64 16(sp) -> t1
+    !1 RD_T1 RS1_T1 ADDI  # t1 + 1 -> t1
+    @0x10 RS1_SP RS2_T1 SD  # u64 t1 -> 16(sp)
+    $.Lemit_dot_string_loop RD_X0 JAL  # goto .Lemit_dot_string_loop
+:.Lemit_dot_string_done
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+    ~emit_byte RD_RA AUIPC  # call emit_byte
+    !emit_byte RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_dot_align
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    !3 RD_T0 RS1_S3 ANDI  # s3 & 3 -> t0
+    @.Lemit_dot_align_done RS1_T0 RS2_X0 BEQ  # if t0 == zero goto .Lemit_dot_align_done
+    !4 RD_T1 RS1_X0 ADDI  # 4 -> t1
+    RD_T1 RS1_T1 RS2_T0 SUB  # t1 - t0 -> t1
+    @0x10 RS1_SP RS2_T1 SW  # u32 t1 -> 16(sp)
+:.Lemit_dot_align_loop
+    !0x10 RD_T1 RS1_SP LW  # i32 16(sp) -> t1
+    @.Lemit_dot_align_done RS1_T1 RS2_X0 BEQ  # if t1 == zero goto .Lemit_dot_align_done
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+    ~emit_byte RD_RA AUIPC  # call emit_byte
+    !emit_byte RD_RA RS1_RA JALR
+    @.Lemit_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_fail
+    !0x10 RD_T1 RS1_SP LW  # i32 16(sp) -> t1
+    !-1 RD_T1 RS1_T1 ADDI  # t1 + -1 -> t1
+    @0x10 RS1_SP RS2_T1 SW  # u32 t1 -> 16(sp)
+    $.Lemit_dot_align_loop RD_X0 JAL  # goto .Lemit_dot_align_loop
+:.Lemit_dot_align_done
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:emit_word
+    !-16 RD_SP RS1_SP ADDI  # sp += -16
+    @8 RS1_SP RS2_RA SD  # u64 ra -> 8(sp)
+    RS1_SP RS2_A0 SD  # u64 a0 -> 0(sp)
+    !0xFF RD_A0 RS1_A0 ANDI  # a0 & 0xff -> a0
+    ~emit_byte RD_RA AUIPC  # call emit_byte
+    !emit_byte RD_RA RS1_RA JALR
+    @.Lemit_word_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_word_fail
+    RD_T0 RS1_SP LD  # u64 0(sp) -> t0
+    !8 RD_A0 RS1_T0 SRLI  # t0 >> 8 -> a0
+    !0xFF RD_A0 RS1_A0 ANDI  # a0 & 0xff -> a0
+    ~emit_byte RD_RA AUIPC  # call emit_byte
+    !emit_byte RD_RA RS1_RA JALR
+    @.Lemit_word_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_word_fail
+    RD_T0 RS1_SP LD  # u64 0(sp) -> t0
+    !0x10 RD_A0 RS1_T0 SRLI  # t0 >> 16 -> a0
+    !0xFF RD_A0 RS1_A0 ANDI  # a0 & 0xff -> a0
+    ~emit_byte RD_RA AUIPC  # call emit_byte
+    !emit_byte RD_RA RS1_RA JALR
+    @.Lemit_word_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_word_fail
+    RD_T0 RS1_SP LD  # u64 0(sp) -> t0
+    !0x18 RD_A0 RS1_T0 SRLI  # t0 >> 24 -> a0
+    !0xFF RD_A0 RS1_A0 ANDI  # a0 & 0xff -> a0
+    ~emit_byte RD_RA AUIPC  # call emit_byte
+    !emit_byte RD_RA RS1_RA JALR
+    !8 RD_RA RS1_SP LD  # u64 8(sp) -> ra
+    !0x10 RD_SP RS1_SP ADDI  # sp += 16
+    RETURN  # return
+:.Lemit_word_fail
+    !8 RD_RA RS1_SP LD  # u64 8(sp) -> ra
+    !0x10 RD_SP RS1_SP ADDI  # sp += 16
+    RETURN  # return
+:emit_dword
+    !-16 RD_SP RS1_SP ADDI  # sp += -16
+    @8 RS1_SP RS2_RA SD  # u64 ra -> 8(sp)
+    RS1_SP RS2_A0 SD  # u64 a0 -> 0(sp)
+    !0xFF RD_A0 RS1_A0 ANDI  # a0 & 0xff -> a0
+    ~emit_byte RD_RA AUIPC  # call emit_byte
+    !emit_byte RD_RA RS1_RA JALR
+    @.Lemit_dword_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_dword_fail
+    RD_T0 RS1_SP LD  # u64 0(sp) -> t0
+    !8 RD_A0 RS1_T0 SRLI  # t0 >> 8 -> a0
+    !0xFF RD_A0 RS1_A0 ANDI  # a0 & 0xff -> a0
+    ~emit_byte RD_RA AUIPC  # call emit_byte
+    !emit_byte RD_RA RS1_RA JALR
+    @.Lemit_dword_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_dword_fail
+    RD_T0 RS1_SP LD  # u64 0(sp) -> t0
+    !0x10 RD_A0 RS1_T0 SRLI  # t0 >> 16 -> a0
+    !0xFF RD_A0 RS1_A0 ANDI  # a0 & 0xff -> a0
+    ~emit_byte RD_RA AUIPC  # call emit_byte
+    !emit_byte RD_RA RS1_RA JALR
+    @.Lemit_dword_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_dword_fail
+    RD_T0 RS1_SP LD  # u64 0(sp) -> t0
+    !0x18 RD_A0 RS1_T0 SRLI  # t0 >> 24 -> a0
+    !0xFF RD_A0 RS1_A0 ANDI  # a0 & 0xff -> a0
+    ~emit_byte RD_RA AUIPC  # call emit_byte
+    !emit_byte RD_RA RS1_RA JALR
+    @.Lemit_dword_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_dword_fail
+    RD_T0 RS1_SP LD  # u64 0(sp) -> t0
+    !0x20 RD_A0 RS1_T0 SRLI  # t0 >> 32 -> a0
+    !0xFF RD_A0 RS1_A0 ANDI  # a0 & 0xff -> a0
+    ~emit_byte RD_RA AUIPC  # call emit_byte
+    !emit_byte RD_RA RS1_RA JALR
+    @.Lemit_dword_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_dword_fail
+    RD_T0 RS1_SP LD  # u64 0(sp) -> t0
+    !0x28 RD_A0 RS1_T0 SRLI  # t0 >> 40 -> a0
+    !0xFF RD_A0 RS1_A0 ANDI  # a0 & 0xff -> a0
+    ~emit_byte RD_RA AUIPC  # call emit_byte
+    !emit_byte RD_RA RS1_RA JALR
+    @.Lemit_dword_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_dword_fail
+    RD_T0 RS1_SP LD  # u64 0(sp) -> t0
+    !0x30 RD_A0 RS1_T0 SRLI  # t0 >> 48 -> a0
+    !0xFF RD_A0 RS1_A0 ANDI  # a0 & 0xff -> a0
+    ~emit_byte RD_RA AUIPC  # call emit_byte
+    !emit_byte RD_RA RS1_RA JALR
+    @.Lemit_dword_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lemit_dword_fail
+    RD_T0 RS1_SP LD  # u64 0(sp) -> t0
+    !0x38 RD_A0 RS1_T0 SRLI  # t0 >> 56 -> a0
+    !0xFF RD_A0 RS1_A0 ANDI  # a0 & 0xff -> a0
+    ~emit_byte RD_RA AUIPC  # call emit_byte
+    !emit_byte RD_RA RS1_RA JALR
+    !8 RD_RA RS1_SP LD  # u64 8(sp) -> ra
+    !0x10 RD_SP RS1_SP ADDI  # sp += 16
+    RETURN  # return
+:.Lemit_dword_fail
+    !8 RD_RA RS1_SP LD  # u64 8(sp) -> ra
+    !0x10 RD_SP RS1_SP ADDI  # sp += 16
+    RETURN  # return
+:emit_byte
+    !-16 RD_SP RS1_SP ADDI  # sp += -16
+    @8 RS1_SP RS2_RA SD  # u64 ra -> 8(sp)
+    RS1_SP RS2_A0 SB  # u8 a0 -> 0(sp)
+    !8 RD_A5 RS1_S1 LD  # u64 8(s1) -> a5
+    RD_A0 RS1_S1 MV  # s1 -> a0
+    RD_A1 RS1_SP LBU  # u8 0(sp) -> a1
+    RD_RA RS1_A5 JALR  # goto *a5
+    !1 RD_S3 RS1_S3 ADDI  # s3 + 1 -> s3
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    !8 RD_RA RS1_SP LD  # u64 8(sp) -> ra
+    !0x10 RD_SP RS1_SP ADDI  # sp += 16
+    RETURN  # return
+:add_label
+    !-48 RD_SP RS1_SP ADDI  # sp += -48
+    @0x28 RS1_SP RS2_RA SD  # u64 ra -> 40(sp)
+    @0x20 RS1_SP RS2_A0 SD  # u64 a0 -> 32(sp)
+    @0x1C RS1_SP RS2_A1 SW  # u32 a1 -> 28(sp)
+    ~label_count_addr RD_T0 AUIPC  # addr label_count_addr -> t0
+    !label_count_addr RD_T0 RS1_T0 ADDI
+    RD_T0 RS1_T0 LD  # u64 0(t0) -> t0
+    RD_T1 RS1_T0 LW  # i32 0(t0) -> t1
+    !0x200 RD_T2 RS1_X0 ADDI  # LABEL_MAX -> t2
+    @.Ladd_label_fail RS1_T1 RS2_T2 BGEU  # if t1 >=u t2 goto .Ladd_label_fail
+    !0x44 RD_T2 RS1_X0 ADDI  # LABEL_ENTRY_SIZE -> t2
+    RD_T3 RS1_T1 RS2_T2 MUL  # t1 * t2 -> t3
+    ~labels_addr RD_T4 AUIPC  # addr labels_addr -> t4
+    !labels_addr RD_T4 RS1_T4 ADDI
+    RD_T4 RS1_T4 LD  # u64 0(t4) -> t4
+    RD_T4 RS1_T4 RS2_T3 ADD  # t4 + t3 -> t4
+    @0x10 RS1_SP RS2_T0 SD  # u64 t0 -> 16(sp)
+    @0xC RS1_SP RS2_T1 SW  # u32 t1 -> 12(sp)
+    RS1_SP RS2_T4 SD  # u64 t4 -> 0(sp)
+    !0x20 RD_A1 RS1_SP LD  # u64 32(sp) -> a1
+    RD_A0 RS1_T4 MV  # t4 -> a0
+    ~copy_name RD_RA AUIPC  # call copy_name
+    !copy_name RD_RA RS1_RA JALR
+    !0xC RD_T1 RS1_SP LW  # i32 12(sp) -> t1
+    !0x10 RD_T0 RS1_SP LD  # u64 16(sp) -> t0
+    RD_T4 RS1_SP LD  # u64 0(sp) -> t4
+    !0x1C RD_T5 RS1_SP LW  # i32 28(sp) -> t5
+    @0x40 RS1_T4 RS2_T5 SW  # u32 t5 -> 64(t4)
+    !1 RD_T1 RS1_T1 ADDI  # t1 + 1 -> t1
+    RS1_T0 RS2_T1 SW  # u32 t1 -> 0(t0)
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $.Ladd_label_done RD_X0 JAL  # goto .Ladd_label_done
+:.Ladd_label_fail
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+:.Ladd_label_done
+    !0x28 RD_RA RS1_SP LD  # u64 40(sp) -> ra
+    !0x30 RD_SP RS1_SP ADDI  # sp += 48
+    RETURN  # return
+:lookup_label
+    !-48 RD_SP RS1_SP ADDI  # sp += -48
+    @0x28 RS1_SP RS2_RA SD  # u64 ra -> 40(sp)
+    @0x20 RS1_SP RS2_A0 SD  # u64 a0 -> 32(sp)
+    ~label_count_addr RD_T0 AUIPC  # addr label_count_addr -> t0
+    !label_count_addr RD_T0 RS1_T0 ADDI
+    RD_T0 RS1_T0 LD  # u64 0(t0) -> t0
+    RD_T1 RS1_T0 LW  # i32 0(t0) -> t1
+    ~labels_addr RD_T2 AUIPC  # addr labels_addr -> t2
+    !labels_addr RD_T2 RS1_T2 ADDI
+    RD_T2 RS1_T2 LD  # u64 0(t2) -> t2
+    RD_T3 RS1_X0 ADDI  # 0 -> t3
+:.Llookup_loop
+    @.Llookup_fail RS1_T3 RS2_T1 BGEU  # if t3 >=u t1 goto .Llookup_fail
+    @0x18 RS1_SP RS2_T1 SD  # u64 t1 -> 24(sp)
+    @0x10 RS1_SP RS2_T2 SD  # u64 t2 -> 16(sp)
+    @8 RS1_SP RS2_T3 SD  # u64 t3 -> 8(sp)
+    !0x20 RD_T4 RS1_SP LD  # u64 32(sp) -> t4
+    RD_A0 RS1_T2 MV  # t2 -> a0
+    RD_A1 RS1_T4 MV  # t4 -> a1
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    !0x18 RD_T1 RS1_SP LD  # u64 24(sp) -> t1
+    !0x10 RD_T2 RS1_SP LD  # u64 16(sp) -> t2
+    !8 RD_T3 RS1_SP LD  # u64 8(sp) -> t3
+    @.Llookup_hit RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Llookup_hit
+    !0x44 RD_T2 RS1_T2 ADDI  # t2 + LABEL_ENTRY_SIZE -> t2
+    !1 RD_T3 RS1_T3 ADDI  # t3 + 1 -> t3
+    $.Llookup_loop RD_X0 JAL  # goto .Llookup_loop
+:.Llookup_hit
+    !0x40 RD_A1 RS1_T2 LWU  # u32 64(t2) -> a1
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    !0x28 RD_RA RS1_SP LD  # u64 40(sp) -> ra
+    !0x30 RD_SP RS1_SP ADDI  # sp += 48
+    RETURN  # return
+:.Llookup_fail
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+    !0x28 RD_RA RS1_SP LD  # u64 40(sp) -> ra
+    !0x30 RD_SP RS1_SP ADDI  # sp += 48
+    RETURN  # return
+:add_define
+    !-48 RD_SP RS1_SP ADDI  # sp += -48
+    @0x28 RS1_SP RS2_RA SD  # u64 ra -> 40(sp)
+    @0x20 RS1_SP RS2_A0 SD  # u64 a0 -> 32(sp)
+    @0x1C RS1_SP RS2_A1 SW  # u32 a1 -> 28(sp)
+    ~define_count_addr RD_T0 AUIPC  # addr define_count_addr -> t0
+    !define_count_addr RD_T0 RS1_T0 ADDI
+    RD_T0 RS1_T0 LD  # u64 0(t0) -> t0
+    RD_T1 RS1_T0 LW  # i32 0(t0) -> t1
+    !0x80 RD_T2 RS1_X0 ADDI  # DEFINE_MAX -> t2
+    @.Ladd_define_fail RS1_T1 RS2_T2 BGEU  # if t1 >=u t2 goto .Ladd_define_fail
+    !0x48 RD_T2 RS1_X0 ADDI  # DEFINE_ENTRY_SIZE -> t2
+    RD_T3 RS1_T1 RS2_T2 MUL  # t1 * t2 -> t3
+    ~defines_addr RD_T4 AUIPC  # addr defines_addr -> t4
+    !defines_addr RD_T4 RS1_T4 ADDI
+    RD_T4 RS1_T4 LD  # u64 0(t4) -> t4
+    RD_T4 RS1_T4 RS2_T3 ADD  # t4 + t3 -> t4
+    @0x10 RS1_SP RS2_T0 SD  # u64 t0 -> 16(sp)
+    @0xC RS1_SP RS2_T1 SW  # u32 t1 -> 12(sp)
+    RS1_SP RS2_T4 SD  # u64 t4 -> 0(sp)
+    !0x20 RD_A1 RS1_SP LD  # u64 32(sp) -> a1
+    RD_A0 RS1_T4 MV  # t4 -> a0
+    ~copy_name RD_RA AUIPC  # call copy_name
+    !copy_name RD_RA RS1_RA JALR
+    !0xC RD_T1 RS1_SP LW  # i32 12(sp) -> t1
+    !0x10 RD_T0 RS1_SP LD  # u64 16(sp) -> t0
+    RD_T4 RS1_SP LD  # u64 0(sp) -> t4
+    !0x1C RD_T5 RS1_SP LW  # i32 28(sp) -> t5
+    @0x40 RS1_T4 RS2_T5 SW  # u32 t5 -> 64(t4)
+    !1 RD_T1 RS1_T1 ADDI  # t1 + 1 -> t1
+    RS1_T0 RS2_T1 SW  # u32 t1 -> 0(t0)
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $.Ladd_define_done RD_X0 JAL  # goto .Ladd_define_done
+:.Ladd_define_fail
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+:.Ladd_define_done
+    !0x28 RD_RA RS1_SP LD  # u64 40(sp) -> ra
+    !0x30 RD_SP RS1_SP ADDI  # sp += 48
+    RETURN  # return
+:lookup_define
+    !-48 RD_SP RS1_SP ADDI  # sp += -48
+    @0x28 RS1_SP RS2_RA SD  # u64 ra -> 40(sp)
+    @0x20 RS1_SP RS2_A0 SD  # u64 a0 -> 32(sp)
+    ~define_count_addr RD_T0 AUIPC  # addr define_count_addr -> t0
+    !define_count_addr RD_T0 RS1_T0 ADDI
+    RD_T0 RS1_T0 LD  # u64 0(t0) -> t0
+    RD_T1 RS1_T0 LW  # i32 0(t0) -> t1
+    ~defines_addr RD_T2 AUIPC  # addr defines_addr -> t2
+    !defines_addr RD_T2 RS1_T2 ADDI
+    RD_T2 RS1_T2 LD  # u64 0(t2) -> t2
+    RD_T3 RS1_X0 ADDI  # 0 -> t3
+:.Llookup_define_loop
+    @.Llookup_define_fail RS1_T3 RS2_T1 BGEU  # if t3 >=u t1 goto .Llookup_define_fail
+    @0x18 RS1_SP RS2_T1 SD  # u64 t1 -> 24(sp)
+    @0x10 RS1_SP RS2_T2 SD  # u64 t2 -> 16(sp)
+    @8 RS1_SP RS2_T3 SD  # u64 t3 -> 8(sp)
+    !0x20 RD_T4 RS1_SP LD  # u64 32(sp) -> t4
+    RD_A0 RS1_T2 MV  # t2 -> a0
+    RD_A1 RS1_T4 MV  # t4 -> a1
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    !0x18 RD_T1 RS1_SP LD  # u64 24(sp) -> t1
+    !0x10 RD_T2 RS1_SP LD  # u64 16(sp) -> t2
+    !8 RD_T3 RS1_SP LD  # u64 8(sp) -> t3
+    @.Llookup_define_hit RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Llookup_define_hit
+    !0x48 RD_T2 RS1_T2 ADDI  # t2 + DEFINE_ENTRY_SIZE -> t2
+    !1 RD_T3 RS1_T3 ADDI  # t3 + 1 -> t3
+    $.Llookup_define_loop RD_X0 JAL  # goto .Llookup_define_loop
+:.Llookup_define_hit
+    !0x40 RD_A1 RS1_T2 LWU  # u32 64(t2) -> a1
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    !0x28 RD_RA RS1_SP LD  # u64 40(sp) -> ra
+    !0x30 RD_SP RS1_SP ADDI  # sp += 48
+    RETURN  # return
+:.Llookup_define_fail
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+    !0x28 RD_RA RS1_SP LD  # u64 40(sp) -> ra
+    !0x30 RD_SP RS1_SP ADDI  # sp += 48
+    RETURN  # return
+:copy_name
+    !0x3F RD_T0 RS1_X0 ADDI  # LABEL_NAME_MAX - 1 -> t0
+:.Lcopy_name_loop
+    @.Lcopy_name_end RS1_T0 RS2_X0 BEQ  # if t0 == zero goto .Lcopy_name_end
+    RD_T1 RS1_A1 LBU  # u8 0(a1) -> t1
+    RS1_A0 RS2_T1 SB  # u8 t1 -> 0(a0)
+    @.Lcopy_name_done RS1_T1 RS2_X0 BEQ  # if t1 == zero goto .Lcopy_name_done
+    !1 RD_A0 RS1_A0 ADDI  # a0 + 1 -> a0
+    !1 RD_A1 RS1_A1 ADDI  # a1 + 1 -> a1
+    !-1 RD_T0 RS1_T0 ADDI  # t0 + -1 -> t0
+    $.Lcopy_name_loop RD_X0 JAL  # goto .Lcopy_name_loop
+:.Lcopy_name_end
+    RS1_A0 RS2_X0 SB  # u8 zero -> 0(a0)
+:.Lcopy_name_done
+    RETURN  # return
+:strings_equal
+:.Lstrcmp_loop
+    RD_T0 RS1_A0 LBU  # u8 0(a0) -> t0
+    RD_T1 RS1_A1 LBU  # u8 0(a1) -> t1
+    @.Lstrcmp_no RS1_T0 RS2_T1 BNE  # if t0 != t1 goto .Lstrcmp_no
+    @.Lstrcmp_yes RS1_T0 RS2_X0 BEQ  # if t0 == zero goto .Lstrcmp_yes
+    !1 RD_A0 RS1_A0 ADDI  # a0 + 1 -> a0
+    !1 RD_A1 RS1_A1 ADDI  # a1 + 1 -> a1
+    $.Lstrcmp_loop RD_X0 JAL  # goto .Lstrcmp_loop
+:.Lstrcmp_yes
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    RETURN  # return
+:.Lstrcmp_no
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+    RETURN  # return
+:string_length
+    RD_T0 RS1_X0 ADDI  # 0 -> t0
+:.Lstrlen_loop
+    RD_T1 RS1_A0 LBU  # u8 0(a0) -> t1
+    @.Lstrlen_done RS1_T1 RS2_X0 BEQ  # if t1 == zero goto .Lstrlen_done
+    !1 RD_A0 RS1_A0 ADDI  # a0 + 1 -> a0
+    !1 RD_T0 RS1_T0 ADDI  # t0 + 1 -> t0
+    $.Lstrlen_loop RD_X0 JAL  # goto .Lstrlen_loop
+:.Lstrlen_done
+    RD_A0 RS1_T0 MV  # t0 -> a0
+    RETURN  # return
+:parse_value
+    !-16 RD_SP RS1_SP ADDI  # sp += -16
+    @8 RS1_SP RS2_RA SD  # u64 ra -> 8(sp)
+    RS1_SP RS2_A0 SD  # u64 a0 -> 0(sp)
+    ~parse_number RD_RA AUIPC  # call parse_number
+    !parse_number RD_RA RS1_RA JALR
+    @.Lparse_value_done RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lparse_value_done
+    RD_A0 RS1_SP LD  # u64 0(sp) -> a0
+    ~parse_char_literal RD_RA AUIPC  # call parse_char_literal
+    !parse_char_literal RD_RA RS1_RA JALR
+    @.Lparse_value_done RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lparse_value_done
+    RD_A0 RS1_SP LD  # u64 0(sp) -> a0
+    ~lookup_define RD_RA AUIPC  # call lookup_define
+    !lookup_define RD_RA RS1_RA JALR
+:.Lparse_value_done
+    !8 RD_RA RS1_SP LD  # u64 8(sp) -> ra
+    !0x10 RD_SP RS1_SP ADDI  # sp += 16
+    RETURN  # return
+:parse_char_literal
+    !1 RD_T5 RS1_X0 ADDI  # 1 -> t5
+    RD_T0 RS1_A0 LBU  # u8 0(a0) -> t0
+    !0x2D RD_T1 RS1_X0 ADDI  # '-' -> t1
+    @.Lchar_no_neg RS1_T0 RS2_T1 BNE  # if t0 != t1 goto .Lchar_no_neg
+    !-1 RD_T5 RS1_X0 ADDI  # -1 -> t5
+    !1 RD_A0 RS1_A0 ADDI  # a0 + 1 -> a0
+    RD_T0 RS1_A0 LBU  # u8 0(a0) -> t0
+:.Lchar_no_neg
+    !0x27 RD_T1 RS1_X0 ADDI  # '\'' -> t1
+    @.Lchar_fail RS1_T0 RS2_T1 BNE  # if t0 != t1 goto .Lchar_fail
+    !1 RD_T2 RS1_A0 LBU  # u8 1(a0) -> t2
+    !0x5C RD_T3 RS1_X0 ADDI  # '\\' -> t3
+    @.Lchar_escape RS1_T2 RS2_T3 BEQ  # if t2 == t3 goto .Lchar_escape
+    @.Lchar_fail RS1_T2 RS2_X0 BEQ  # if t2 == zero goto .Lchar_fail
+    !2 RD_T3 RS1_A0 LBU  # u8 2(a0) -> t3
+    !0x27 RD_T4 RS1_X0 ADDI  # '\'' -> t4
+    @.Lchar_fail RS1_T3 RS2_T4 BNE  # if t3 != t4 goto .Lchar_fail
+    !3 RD_T3 RS1_A0 LBU  # u8 3(a0) -> t3
+    @.Lchar_fail RS1_T3 RS2_X0 BNE  # if t3 != zero goto .Lchar_fail
+    RD_A1 RS1_T2 MV  # t2 -> a1
+    $.Lchar_done RD_X0 JAL  # goto .Lchar_done
+:.Lchar_escape
+    !2 RD_T2 RS1_A0 LBU  # u8 2(a0) -> t2
+    !3 RD_T3 RS1_A0 LBU  # u8 3(a0) -> t3
+    !0x27 RD_T4 RS1_X0 ADDI  # '\'' -> t4
+    @.Lchar_fail RS1_T3 RS2_T4 BNE  # if t3 != t4 goto .Lchar_fail
+    !4 RD_T3 RS1_A0 LBU  # u8 4(a0) -> t3
+    @.Lchar_fail RS1_T3 RS2_X0 BNE  # if t3 != zero goto .Lchar_fail
+    !0x74 RD_T3 RS1_X0 ADDI  # 't' -> t3
+    @.Lchar_tab RS1_T2 RS2_T3 BEQ  # if t2 == t3 goto .Lchar_tab
+    !0x6E RD_T3 RS1_X0 ADDI  # 'n' -> t3
+    @.Lchar_nl RS1_T2 RS2_T3 BEQ  # if t2 == t3 goto .Lchar_nl
+    !0x30 RD_T3 RS1_X0 ADDI  # '0' -> t3
+    @.Lchar_zero RS1_T2 RS2_T3 BEQ  # if t2 == t3 goto .Lchar_zero
+    !0x5C RD_T3 RS1_X0 ADDI  # '\\' -> t3
+    @.Lchar_backslash RS1_T2 RS2_T3 BEQ  # if t2 == t3 goto .Lchar_backslash
+    !0x27 RD_T3 RS1_X0 ADDI  # '\'' -> t3
+    @.Lchar_quote RS1_T2 RS2_T3 BEQ  # if t2 == t3 goto .Lchar_quote
+    !0x22 RD_T3 RS1_X0 ADDI  # '"' -> t3
+    @.Lchar_dquote RS1_T2 RS2_T3 BEQ  # if t2 == t3 goto .Lchar_dquote
+    $.Lchar_fail RD_X0 JAL  # goto .Lchar_fail
+:.Lchar_tab
+    !9 RD_A1 RS1_X0 ADDI  # 9 -> a1
+    $.Lchar_done RD_X0 JAL  # goto .Lchar_done
+:.Lchar_nl
+    !0xA RD_A1 RS1_X0 ADDI  # 10 -> a1
+    $.Lchar_done RD_X0 JAL  # goto .Lchar_done
+:.Lchar_zero
+    RD_A1 RS1_X0 ADDI  # 0 -> a1
+    $.Lchar_done RD_X0 JAL  # goto .Lchar_done
+:.Lchar_backslash
+    !0x5C RD_A1 RS1_X0 ADDI  # '\\' -> a1
+    $.Lchar_done RD_X0 JAL  # goto .Lchar_done
+:.Lchar_quote
+    !0x27 RD_A1 RS1_X0 ADDI  # '\'' -> a1
+    $.Lchar_done RD_X0 JAL  # goto .Lchar_done
+:.Lchar_dquote
+    !0x22 RD_A1 RS1_X0 ADDI  # '"' -> a1
+    $.Lchar_done RD_X0 JAL  # goto .Lchar_done
+:.Lchar_done
+    @.Lchar_negate RS1_T5 RS2_X0 BLT  # if t5 < zero goto .Lchar_negate
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    RETURN  # return
+:.Lchar_negate
+    RD_A1 RS1_X0 RS2_A1 SUB  # -a1 -> a1
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    RETURN  # return
+:.Lchar_fail
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+    RETURN  # return
+:eval_expr_range
+    !-32 RD_SP RS1_SP ADDI  # sp += -32
+    @0x18 RS1_SP RS2_RA SD  # u64 ra -> 24(sp)
+    @0x10 RS1_SP RS2_A0 SW  # u32 a0 -> 16(sp)
+    @0xC RS1_SP RS2_A1 SW  # u32 a1 -> 12(sp)
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_value RD_RA AUIPC  # call parse_value
+    !parse_value RD_RA RS1_RA JALR
+    @.Leval_expr_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Leval_expr_fail
+    @8 RS1_SP RS2_A1 SW  # u32 a1 -> 8(sp)
+    !0xC RD_T0 RS1_SP LW  # i32 12(sp) -> t0
+    !1 RD_T1 RS1_X0 ADDI  # 1 -> t1
+    @.Leval_expr_one RS1_T0 RS2_T1 BEQ  # if t0 == t1 goto .Leval_expr_one
+    !3 RD_T1 RS1_X0 ADDI  # 3 -> t1
+    @.Leval_expr_fail RS1_T0 RS2_T1 BNE  # if t0 != t1 goto .Leval_expr_fail
+    !0x10 RD_T0 RS1_SP LW  # i32 16(sp) -> t0
+    !1 RD_A0 RS1_T0 ADDI  # t0 + 1 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    RD_T6 RS1_A0 MV  # a0 -> t6
+    !0x10 RD_T0 RS1_SP LW  # i32 16(sp) -> t0
+    !2 RD_A0 RS1_T0 ADDI  # t0 + 2 -> a0
+    ~token_ptr RD_RA AUIPC  # call token_ptr
+    !token_ptr RD_RA RS1_RA JALR
+    ~parse_value RD_RA AUIPC  # call parse_value
+    !parse_value RD_RA RS1_RA JALR
+    @.Leval_expr_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Leval_expr_fail
+    @4 RS1_SP RS2_A1 SW  # u32 a1 -> 4(sp)
+    RD_A0 RS1_T6 MV  # t6 -> a0
+    ~str_plus RD_A1 AUIPC  # addr str_plus -> a1
+    !str_plus RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Leval_expr_add RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Leval_expr_add
+    RD_A0 RS1_T6 MV  # t6 -> a0
+    ~str_minus RD_A1 AUIPC  # addr str_minus -> a1
+    !str_minus RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Leval_expr_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Leval_expr_fail
+    !8 RD_T0 RS1_SP LW  # i32 8(sp) -> t0
+    !4 RD_T1 RS1_SP LW  # i32 4(sp) -> t1
+    RD_A1 RS1_T0 RS2_T1 SUB  # t0 - t1 -> a1
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $.Leval_expr_done RD_X0 JAL  # goto .Leval_expr_done
+:.Leval_expr_add
+    !8 RD_T0 RS1_SP LW  # i32 8(sp) -> t0
+    !4 RD_T1 RS1_SP LW  # i32 4(sp) -> t1
+    RD_A1 RS1_T0 RS2_T1 ADD  # t0 + t1 -> a1
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $.Leval_expr_done RD_X0 JAL  # goto .Leval_expr_done
+:.Leval_expr_one
+    !8 RD_A1 RS1_SP LW  # i32 8(sp) -> a1
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $.Leval_expr_done RD_X0 JAL  # goto .Leval_expr_done
+:.Leval_expr_fail
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+:.Leval_expr_done
+    !0x18 RD_RA RS1_SP LD  # u64 24(sp) -> ra
+    !0x20 RD_SP RS1_SP ADDI  # sp += 32
+    RETURN  # return
+:parse_register
+    !-16 RD_SP RS1_SP ADDI  # sp += -16
+    @8 RS1_SP RS2_RA SD  # u64 ra -> 8(sp)
+    RD_T6 RS1_A0 MV  # a0 -> t6
+    RD_T0 RS1_A0 LBU  # u8 0(a0) -> t0
+    !0x78 RD_T1 RS1_X0 ADDI  # 'x' -> t1
+    @.Lreg_x RS1_T0 RS2_T1 BEQ  # if t0 == t1 goto .Lreg_x
+    ~reg_zero RD_A1 AUIPC  # addr reg_zero -> a1
+    !reg_zero RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lreg_zero RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lreg_zero
+    RD_A0 RS1_T6 MV  # t6 -> a0
+    ~reg_ra RD_A1 AUIPC  # addr reg_ra -> a1
+    !reg_ra RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lreg_ra RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lreg_ra
+    RD_A0 RS1_T6 MV  # t6 -> a0
+    ~reg_sp RD_A1 AUIPC  # addr reg_sp -> a1
+    !reg_sp RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lreg_sp RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lreg_sp
+    RD_A0 RS1_T6 MV  # t6 -> a0
+    ~reg_gp RD_A1 AUIPC  # addr reg_gp -> a1
+    !reg_gp RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lreg_gp RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lreg_gp
+    RD_A0 RS1_T6 MV  # t6 -> a0
+    ~reg_tp RD_A1 AUIPC  # addr reg_tp -> a1
+    !reg_tp RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lreg_tp RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lreg_tp
+    RD_A0 RS1_T6 MV  # t6 -> a0
+    ~reg_fp RD_A1 AUIPC  # addr reg_fp -> a1
+    !reg_fp RD_A1 RS1_A1 ADDI
+    ~strings_equal RD_RA AUIPC  # call strings_equal
+    !strings_equal RD_RA RS1_RA JALR
+    @.Lreg_fp RS1_A0 RS2_X0 BNE  # if a0 != zero goto .Lreg_fp
+    RD_A0 RS1_T6 MV  # t6 -> a0
+    RD_T0 RS1_A0 LBU  # u8 0(a0) -> t0
+    !0x74 RD_T1 RS1_X0 ADDI  # 't' -> t1
+    @.Lreg_t RS1_T0 RS2_T1 BEQ  # if t0 == t1 goto .Lreg_t
+    !0x61 RD_T1 RS1_X0 ADDI  # 'a' -> t1
+    @.Lreg_a RS1_T0 RS2_T1 BEQ  # if t0 == t1 goto .Lreg_a
+    !0x73 RD_T1 RS1_X0 ADDI  # 's' -> t1
+    @.Lreg_s RS1_T0 RS2_T1 BEQ  # if t0 == t1 goto .Lreg_s
+    $.Lreg_fail RD_X0 JAL  # goto .Lreg_fail
+:.Lreg_x
+    !1 RD_A0 RS1_A0 ADDI  # a0 + 1 -> a0
+    ~parse_number RD_RA AUIPC  # call parse_number
+    !parse_number RD_RA RS1_RA JALR
+    @.Lreg_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lreg_fail
+    !0x20 RD_T0 RS1_X0 ADDI  # 32 -> t0
+    @.Lreg_fail RS1_A1 RS2_T0 BGEU  # if a1 >=u t0 goto .Lreg_fail
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $.Lparse_register_done RD_X0 JAL  # goto .Lparse_register_done
+:.Lreg_zero
+    RD_A1 RS1_X0 ADDI  # 0 -> a1
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $.Lparse_register_done RD_X0 JAL  # goto .Lparse_register_done
+:.Lreg_ra
+    !1 RD_A1 RS1_X0 ADDI  # 1 -> a1
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $.Lparse_register_done RD_X0 JAL  # goto .Lparse_register_done
+:.Lreg_sp
+    !2 RD_A1 RS1_X0 ADDI  # 2 -> a1
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $.Lparse_register_done RD_X0 JAL  # goto .Lparse_register_done
+:.Lreg_gp
+    !3 RD_A1 RS1_X0 ADDI  # 3 -> a1
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $.Lparse_register_done RD_X0 JAL  # goto .Lparse_register_done
+:.Lreg_tp
+    !4 RD_A1 RS1_X0 ADDI  # 4 -> a1
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $.Lparse_register_done RD_X0 JAL  # goto .Lparse_register_done
+:.Lreg_fp
+    !8 RD_A1 RS1_X0 ADDI  # 8 -> a1
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $.Lparse_register_done RD_X0 JAL  # goto .Lparse_register_done
+:.Lreg_t
+    !1 RD_T0 RS1_A0 LBU  # u8 1(a0) -> t0
+    !-48 RD_T0 RS1_T0 ADDI  # t0 + -'0' -> t0
+    !7 RD_T1 RS1_X0 ADDI  # 7 -> t1
+    @.Lreg_fail RS1_T0 RS2_T1 BGEU  # if t0 >=u t1 goto .Lreg_fail
+    !2 RD_T1 RS1_A0 LBU  # u8 2(a0) -> t1
+    @.Lreg_fail RS1_T1 RS2_X0 BNE  # if t1 != zero goto .Lreg_fail
+    !3 RD_T1 RS1_X0 ADDI  # 3 -> t1
+    @.Lreg_t_low RS1_T0 RS2_T1 BLTU  # if t0 <u t1 goto .Lreg_t_low
+    !0x19 RD_A1 RS1_T0 ADDI  # t0 + 25 -> a1
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $.Lparse_register_done RD_X0 JAL  # goto .Lparse_register_done
+:.Lreg_t_low
+    !5 RD_A1 RS1_T0 ADDI  # t0 + 5 -> a1
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $.Lparse_register_done RD_X0 JAL  # goto .Lparse_register_done
+:.Lreg_a
+    !1 RD_T0 RS1_A0 LBU  # u8 1(a0) -> t0
+    !-48 RD_T0 RS1_T0 ADDI  # t0 + -'0' -> t0
+    !8 RD_T1 RS1_X0 ADDI  # 8 -> t1
+    @.Lreg_fail RS1_T0 RS2_T1 BGEU  # if t0 >=u t1 goto .Lreg_fail
+    !2 RD_T1 RS1_A0 LBU  # u8 2(a0) -> t1
+    @.Lreg_fail RS1_T1 RS2_X0 BNE  # if t1 != zero goto .Lreg_fail
+    !0xA RD_A1 RS1_T0 ADDI  # t0 + 10 -> a1
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $.Lparse_register_done RD_X0 JAL  # goto .Lparse_register_done
+:.Lreg_s
+    !1 RD_A0 RS1_A0 ADDI  # a0 + 1 -> a0
+    ~parse_number RD_RA AUIPC  # call parse_number
+    !parse_number RD_RA RS1_RA JALR
+    @.Lreg_fail RS1_A0 RS2_X0 BEQ  # if a0 == zero goto .Lreg_fail
+    !2 RD_T0 RS1_X0 ADDI  # 2 -> t0
+    @.Lreg_s_low RS1_A1 RS2_T0 BLTU  # if a1 <u t0 goto .Lreg_s_low
+    !0xC RD_T0 RS1_X0 ADDI  # 12 -> t0
+    @.Lreg_fail RS1_A1 RS2_T0 BGEU  # if a1 >=u t0 goto .Lreg_fail
+    !0x10 RD_A1 RS1_A1 ADDI  # a1 + 16 -> a1
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $.Lparse_register_done RD_X0 JAL  # goto .Lparse_register_done
+:.Lreg_s_low
+    !8 RD_A1 RS1_A1 ADDI  # a1 + 8 -> a1
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    $.Lparse_register_done RD_X0 JAL  # goto .Lparse_register_done
+:.Lreg_fail
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+:.Lparse_register_done
+    !8 RD_RA RS1_SP LD  # u64 8(sp) -> ra
+    !0x10 RD_SP RS1_SP ADDI  # sp += 16
+    RETURN  # return
+:parse_number
+    RD_T0 RS1_X0 ADDI  # 0 -> t0
+    !1 RD_T1 RS1_X0 ADDI  # 1 -> t1
+    RD_T2 RS1_A0 LBU  # u8 0(a0) -> t2
+    !0x2D RD_T3 RS1_X0 ADDI  # '-' -> t3
+    @.Lpn_prefix_check RS1_T2 RS2_T3 BNE  # if t2 != t3 goto .Lpn_prefix_check
+    !-1 RD_T1 RS1_X0 ADDI  # -1 -> t1
+    !1 RD_A0 RS1_A0 ADDI  # a0 + 1 -> a0
+:.Lpn_prefix_check
+    RD_T2 RS1_A0 LBU  # u8 0(a0) -> t2
+    !0x30 RD_T3 RS1_X0 ADDI  # '0' -> t3
+    @.Lpn_dec_loop RS1_T2 RS2_T3 BNE  # if t2 != t3 goto .Lpn_dec_loop
+    !1 RD_T4 RS1_A0 LBU  # u8 1(a0) -> t4
+    !0x78 RD_T5 RS1_X0 ADDI  # 'x' -> t5
+    @.Lpn_hex_start RS1_T4 RS2_T5 BEQ  # if t4 == t5 goto .Lpn_hex_start
+    !0x58 RD_T5 RS1_X0 ADDI  # 'X' -> t5
+    @.Lpn_hex_start RS1_T4 RS2_T5 BEQ  # if t4 == t5 goto .Lpn_hex_start
+:.Lpn_dec_loop
+:.Lpn_loop_dec_body
+    RD_T2 RS1_A0 LBU  # u8 0(a0) -> t2
+    @.Lpn_done RS1_T2 RS2_X0 BEQ  # if t2 == zero goto .Lpn_done
+    !-48 RD_T2 RS1_T2 ADDI  # t2 + -'0' -> t2
+    !0xA RD_T3 RS1_X0 ADDI  # 10 -> t3
+    @.Lpn_fail RS1_T2 RS2_T3 BGEU  # if t2 >=u t3 goto .Lpn_fail
+    !0xA RD_T3 RS1_X0 ADDI  # 10 -> t3
+    RD_T0 RS1_T0 RS2_T3 MUL  # t0 * t3 -> t0
+    RD_T0 RS1_T0 RS2_T2 ADD  # t0 + t2 -> t0
+    !1 RD_A0 RS1_A0 ADDI  # a0 + 1 -> a0
+    $.Lpn_loop_dec_body RD_X0 JAL  # goto .Lpn_loop_dec_body
+:.Lpn_hex_start
+    !2 RD_A0 RS1_A0 ADDI  # a0 + 2 -> a0
+:.Lpn_hex_loop
+    RD_T2 RS1_A0 LBU  # u8 0(a0) -> t2
+    @.Lpn_done RS1_T2 RS2_X0 BEQ  # if t2 == zero goto .Lpn_done
+    !0x30 RD_T3 RS1_X0 ADDI  # '0' -> t3
+    @.Lpn_fail RS1_T2 RS2_T3 BLTU  # if t2 <u t3 goto .Lpn_fail
+    !0x39 RD_T3 RS1_X0 ADDI  # '9' -> t3
+    @.Lpn_hex_digit RS1_T3 RS2_T2 BGEU  # if t2 <=u t3 goto .Lpn_hex_digit
+    !0x61 RD_T3 RS1_X0 ADDI  # 'a' -> t3
+    @.Lpn_hex_upper_check RS1_T2 RS2_T3 BLTU  # if t2 <u t3 goto .Lpn_hex_upper_check
+    !0x66 RD_T3 RS1_X0 ADDI  # 'f' -> t3
+    @.Lpn_hex_lower RS1_T3 RS2_T2 BGEU  # if t2 <=u t3 goto .Lpn_hex_lower
+:.Lpn_hex_upper_check
+    !0x41 RD_T3 RS1_X0 ADDI  # 'A' -> t3
+    @.Lpn_fail RS1_T2 RS2_T3 BLTU  # if t2 <u t3 goto .Lpn_fail
+    !0x46 RD_T3 RS1_X0 ADDI  # 'F' -> t3
+    @.Lpn_fail RS1_T3 RS2_T2 BLTU  # if t2 >u t3 goto .Lpn_fail
+    !-65 RD_T2 RS1_T2 ADDI  # t2 + -'A' -> t2
+    !0xA RD_T2 RS1_T2 ADDI  # t2 + 10 -> t2
+    $.Lpn_hex_accum RD_X0 JAL  # goto .Lpn_hex_accum
+:.Lpn_hex_lower
+    !-97 RD_T2 RS1_T2 ADDI  # t2 + -'a' -> t2
+    !0xA RD_T2 RS1_T2 ADDI  # t2 + 10 -> t2
+    $.Lpn_hex_accum RD_X0 JAL  # goto .Lpn_hex_accum
+:.Lpn_hex_digit
+    !-48 RD_T2 RS1_T2 ADDI  # t2 + -'0' -> t2
+:.Lpn_hex_accum
+    !4 RD_T0 RS1_T0 SLLI  # t0 << 4 -> t0
+    RD_T0 RS1_T0 RS2_T2 ADD  # t0 + t2 -> t0
+    !1 RD_A0 RS1_A0 ADDI  # a0 + 1 -> a0
+    $.Lpn_hex_loop RD_X0 JAL  # goto .Lpn_hex_loop
+:.Lpn_done
+    RD_A1 RS1_T0 RS2_T1 MUL  # t0 * t1 -> a1
+    !1 RD_A0 RS1_X0 ADDI  # 1 -> a0
+    RETURN  # return
+:.Lpn_fail
+    RD_A0 RS1_X0 ADDI  # 0 -> a0
+    RETURN  # return
+:label_count_addr
+    '0000108000000000'
+:define_count_addr
+    '0400108000000000'
+:fail_line_addr
+    '0800108000000000'
+:fail_phase_addr
+    '0C00108000000000'
+:fail_stage_addr
+    '1000108000000000'
+:labels_addr
+    '0001108000000000'
+:defines_addr
+    '0090108000000000'
+:line_addr
+    '00C0108000000000'
+:token_ptrs_addr
+    '00C1108000000000'
+:source_base_addr
+    '0000208000000000'
+:stack_top_addr
+    '0000508000000000'
+:str_as0
+    "as0"
+:str_dot
+    "."
+:str_dot_align
+    ".align"
+:str_dot_byte
+    ".byte"
+:str_dot_dword
+    ".dword"
+:str_dot_equ
+    ".equ"
+:str_dot_global
+    ".global"
+:str_dot_string
+    ".string"
+:str_dot_text
+    ".text"
+:str_dot_word
+    ".word"
+:str_minus
+    "-"
+:str_plus
+    "+"
+:str_add
+    "add"
+:str_addi
+    "addi"
+:str_andi
+    "andi"
+:str_and
+    "and"
+:str_beqz
+    "beqz"
+:str_beq
+    "beq"
+:str_bge
+    "bge"
+:str_bgeu
+    "bgeu"
+:str_bgt
+    "bgt"
+:str_bgtu
+    "bgtu"
+:str_bgtz
+    "bgtz"
+:str_call
+    "call"
+:str_ble
+    "ble"
+:str_bleu
+    "bleu"
+:str_blez
+    "blez"
+:str_bgez
+    "bgez"
+:str_blt
+    "blt"
+:str_bltu
+    "bltu"
+:str_bltz
+    "bltz"
+:str_bne
+    "bne"
+:str_bnez
+    "bnez"
+:str_ebreak
+    "ebreak"
+:str_ecall
+    "ecall"
+:str_fence
+    "fence"
+:str_fence_i
+    "fence.i"
+:str_j
+    "j"
+:str_jal
+    "jal"
+:str_jalr
+    "jalr"
+:str_jr
+    "jr"
+:str_lbu
+    "lbu"
+:str_ld
+    "ld"
+:str_li
+    "li"
+:str_lui
+    "lui"
+:str_la
+    "la"
+:str_lw
+    "lw"
+:str_lwu
+    "lwu"
+:str_mul
+    "mul"
+:str_mv
+    "mv"
+:str_neg
+    "neg"
+:str_negw
+    "negw"
+:str_not
+    "not"
+:str_or
+    "or"
+:str_sb
+    "sb"
+:str_seqz
+    "seqz"
+:str_sd
+    "sd"
+:str_sgtz
+    "sgtz"
+:str_slt
+    "slt"
+:str_sltiu
+    "sltiu"
+:str_sltu
+    "sltu"
+:str_sltz
+    "sltz"
+:str_snez
+    "snez"
+:str_sub
+    "sub"
+:str_subw
+    "subw"
+:str_sw
+    "sw"
+:str_slli
+    "slli"
+:str_srli
+    "srli"
+:str_tail
+    "tail"
+:str_ret
+    "ret"
+:str_xor
+    "xor"
+:str_xori
+    "xori"
+:reg_zero
+    "zero"
+:reg_ra
+    "ra"
+:reg_sp
+    "sp"
+:reg_gp
+    "gp"
+:reg_tp
+    "tp"
+:reg_fp
+    "fp"

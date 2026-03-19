@@ -17,7 +17,7 @@
  */
 
 #include <stdint.h>
-#include "uart.h"
+#include "system.h"
 
 #define CODE_BUFFER_MAX 0x1000u
 
