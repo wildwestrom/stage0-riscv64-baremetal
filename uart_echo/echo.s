@@ -21,32 +21,39 @@
     .global _start
     .text
 
+.equ UART_BASE, 0x10000000
+# Register usage
+# a1: UART_BASE
+# a2: LSR
+
 _start:
     # Set up stack (same absolute address as all programs)
     li sp, 0x80002220
-
     # UART base address
     li a1, 0x10000000
-    # LSR offset (Line Status Register at offset 0x05)
-    li a2, 0x10000005
+    # LSR offset (Line Status Register at offset 0x5)
+    addi a2, a1, 0x5
 
-echo_loop:
-    # Poll LSR bit 0 (Data Ready)
+poll_rx:
+    # Poll LSR
     lb a0, (a2)
-    andi a0, a0, 1
-    beq a0, x0, echo_loop  # If no data ready, loop back
-
+		# Mask bit 0 (data ready)
+    andi a0, a0, 0b1
+		# If no data ready, loop back
+    beq a0, x0, poll_rx
+read_data:
     # Data is ready, read from RBR (offset 0x00, same as base)
     lb a0, (a1)
 
-    # Wait for THR to be empty (LSR bit 5 = Transmit Holding Register Empty)
-wait_tx:
+poll_tx:
+		# Poll LSR
     lb a3, (a2)
-    andi a3, a3, 0x20  # Mask bit 5
-    beq a3, x0, wait_tx  # If TX not ready, wait
-
+		# Mask bit 5 (TX ready)
+    andi a3, a3, 0b100000
+		# If TX not ready, wait
+    beq a3, x0, poll_tx
+echo_char:
     # Echo the character back
     sb a0, (a1)
-
-    # Continue loop
-    j echo_loop
+    # Start read
+    j poll_rx

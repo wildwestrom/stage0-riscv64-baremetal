@@ -28,7 +28,7 @@
 # what they are labeled. I have not verified this myself.
 
 :_start
-    # Stack setup (sp = 0x80002220)
+    # Set up stack (sp = 0x80002220)
     # Built via: lui 0x40, addiw 1, slli 13, addi 0x220
     ~0x00040000 RD_SP LUI        ; sp = 0x00040000
     !1 RD_SP RS1_SP ADDIW        ; sp = 0x00040001
@@ -37,30 +37,32 @@
 
     # UART address setup
     ~0x10000000 RD_A1 LUI        ; a1 = UART base
-    ~0x10000000 RD_A2 LUI        ; a2 = UART base
-    !5 RD_A2 RS1_A2 ADDIW        ; a2 = UART LSR
+    # LSR offset
+    !5 RD_A2 RS1_A1 ADDIW        ; a2 = UART LSR = UART base + 5
 
-:echo_loop
+:poll_rx
     # Poll LSR bit 0 (Data Ready)
     RD_A0 RS1_A2 LB              ; lb a0, 0(a2)
     !1 RD_A0 RS1_A0 ANDI         ; andi a0, a0, 1
 
 		# Try again if not ready
-    @echo_loop RS1_A0 RS2_X0 BEQ ; beq a0, x0, echo_loop
+    @poll_rx RS1_A0 RS2_X0 BEQ   ; beq a0, x0, poll_rx
 
+;read_data
     # Data ready, read from RBR
     RD_A0 RS1_A1 LB              ; lb a0, 0(a1)
 
-:wait_tx
+:poll_tx
     # Wait for TX ready (bit 5 of LSR)
     RD_A3 RS1_A2 LB              ; lb a3, 0(a2)
     !0x20 RD_A3 RS1_A3 ANDI      ; andi a3, a3, 0x20
 
 		# Not ready, try again
-    @wait_tx RS1_A3 RS2_X0 BEQ   ; beq a3, x0, wait_tx
+    @poll_tx RS1_A3 RS2_X0 BEQ   ; beq a3, x0, poll_tx
 
+;echo
     # Ready: Echo the character
     RS1_A1 RS2_A0 SB             ; sb a0, 0(a1)
 
     # Loop forever
-    $echo_loop RD_X0 JAL         ; jal x0, echo_loop
+    $poll_rx RD_X0 JAL         ; jal x0, poll_rx
