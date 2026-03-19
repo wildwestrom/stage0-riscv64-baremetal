@@ -1,49 +1,21 @@
 # ATTN: Agents
 
-This file provides guidance to LLMs when working with code in this repository. Any time you repeatedly make a mistake or waste time, put it here so you don't do it again.
+This file is the index for repository-specific agent guidance. Keep detailed guidance in `docs/` and keep this file short.
 
-## Comments
+If you repeatedly make a mistake or waste time, add or update the relevant doc in `docs/` and link it here.
 
-Comments are extremely important. Much of this is opaque machine code and assembly. Comments are critical for both humans and LLMs to understand just what the hell is going on. If at any time a comment misled you or doesn't match what's actually happening to the registers, memory, stack, etc. then rewrite it so it matches. Any lies within the comments serve only to mislead future readers and undermine auditability.
+## Index
 
-## Automated Testing
-
-Tests are automated with `just`. QEMU is used for testing since there's no physical RISC-V machine available.
-
-**Use `just` recipes - avoid writing shell commands by hand.** If a command you need isn't in the `justfile` and it's complicated, add it as a new recipe. It's much less error-prone and saves on context. I can always clear the context once we get a working command.
-
-## Discovery
-
-The `tree` command is useful for discovering files within the project and understanding its current structure. Also use `tree --gitignore -I reference` for less noisy output.
-
-## What is with the weird file extensions?
-According to the stage0 project (https://git.sr.ht/~oriansj/bootstrappable-wiki/blob/wiki/
-  stage0.md) the macro assembler source files should all have the extension `.M1`.
-
-> File extensions are very important in stage0, they directly indicate the level of infrastructure
-> required to build them.
-> * HEX0 - indicates that the file can be built using the stage0 hex monitor or any other tool that supports the minimal commented hex syntax
-> * HEX1 - indicates that the file also requires support for 1 character labels and a single size (commonly 16bit) relative displacements.
-> * HEX2 - indicates that the file also requires support for long labels, 16bit absolute displacements and 32bit pointers for manual object creation.
-> * M0/M1/S - indicates that the file can either be built by the platform specific M0 macro assembler or the platform neutral M1 macro assembler
-> * c/h - indicates that the file contains C code
-> * s/inc - indicates that the file contains assembly (in this project we have to use GNU assembler as it's the only one that supports our target) 
-
-## Disassembling for Reference
-
-To get assembly reference from a .s file, roughly do this:
-
-```sh
-riscv64-none-elf-as -march=rv64i -mabi=lp64 uart_echo/echo.s -o build/echo.o \
-&& riscv64-none-elf-gcc -Ttext=0x80000000 -e _start -march=rv64i -mabi=lp64 \
--mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none \
-build/echo.o -o build/echo.elf \
-&& riscv64-none-elf-objdump -d build/echo.elf
-```
-
-Note: `objdump` shows instruction words as big-endian hex (e.g., `00040137`). For hex0 format, reverse the bytes: `00040137` → `37 01 04 00`.
-
-## Annotated Hex
-
-Use `just annotate_hex0` and `just annotate_hex1` to generate heavily annotated versions of hex0 machine code.
-This validates that the jump and label addresses are correct, and does its best to break down each machine instruction by byte.
+- `docs/conventions.md`
+  - Comment quality expectations
+  - File extension conventions used by stage0 and this repository
+  - Annotated hex workflows
+  - C prototype goals and constraints
+- `docs/reference-material.md`
+  - What lives in `reference/`
+  - When to consult it
+  - How to inspect it selectively without loading everything
+- `docs/workflows.md`
+  - Test and build command conventions
+  - Repository discovery tips
+  - Disassembly workflow for `.s` files
