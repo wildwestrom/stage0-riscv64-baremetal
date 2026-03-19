@@ -4,3 +4,12 @@
 [submodule "reference/riscv-opcodes"]
 	path = reference/riscv-opcodes
 	url = https://github.com/riscv/riscv-opcodes.git
+[submodule "reference/riscv-tests"]
+	path = reference/riscv-tests
+	url = https://github.com/riscv-software-src/riscv-tests.git
+[submodule "reference/binutils-gdb"]
+	path = reference/binutils-gdb
+	url = git://sourceware.org/git/binutils-gdb.git
+[submodule "reference/fasm"]
+	path = reference/fasm
+	url = https://github.com/tgrysztar/fasm.git
