@@ -1,6 +1,6 @@
-[submodule "bootstrap-seeds"]
-	path = bootstrap-seeds
-	url = https://github.com/oriansj/bootstrap-seeds.git
-[submodule "derzforth"]
-	path = derzforth
-	url = https://github.com/theandrew168/derzforth.git
+[submodule "reference/original_stage0"]
+	path = reference/original_stage0
+	url = https://github.com/oriansj/stage0.git
+[submodule "reference/riscv-opcodes"]
+	path = reference/riscv-opcodes
+	url = https://github.com/riscv/riscv-opcodes.git
