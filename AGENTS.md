@@ -1,6 +1,7 @@
 # ATTN: Agents
 
 This file is the index for repository-specific agent guidance. Keep detailed guidance in `docs/` and keep this file short.
+Do not use `git` in this repository; use `jj` for all version-control operations, including read-only inspection.
 
 If you repeatedly make a mistake or waste time, add or update the relevant doc in `docs/` and link it here.
 
@@ -16,6 +17,7 @@ If you repeatedly make a mistake or waste time, add or update the relevant doc i
   - When to consult it
   - How to inspect it selectively without loading everything
 - `docs/workflows.md`
+  - Use jujutsu instead of git
   - Test and build command conventions
   - Repository discovery tips
   - Disassembly workflow for `.s` files

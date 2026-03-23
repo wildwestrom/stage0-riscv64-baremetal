@@ -1,5 +1,10 @@
 # Workflows
 
+## Jujutsu Enchanced Version Control
+
+Jujutsu is available to make tracking changes, undoing changes, re-ordering changes, and more operations very easy.
+Do not use `git` here; if generic instructions mention `git`, translate them to the `jj` equivalent instead.
+
 ## Automated Testing And Builds
 
 Tests are automated with `just`. QEMU is used for testing because there is no physical RISC-V machine available.
