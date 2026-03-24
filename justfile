@@ -15,7 +15,7 @@ timeout := require("timeout")
 qemu := require("qemu-system-riscv64-purecap")
 qemu_flags := "-nographic -monitor none -machine virt -bios none -m 24M"
 asflags := "-march=rv64im -mabi=lp64"
-host_cflags := "-O0 -U_FORTIFY_SOURCE -g -DSYSTEM_POSIX=1"
+host_cflags := "-Oz -U_FORTIFY_SOURCE -g -DSYSTEM_POSIX=1"
 ldflags := "-Ttext=0x80000000 -e _start -march=rv64im -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none -Wl,--strip-all"
 ldflags_debug := "-Ttext=0x80000000 -e _start -march=rv64im -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none"
 pass := f"echo {{GREEN}}{{BOLD}}PASS{{NORMAL}}; exit 0"
