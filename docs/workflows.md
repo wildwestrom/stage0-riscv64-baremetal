@@ -5,6 +5,8 @@
 Jujutsu is available to make tracking changes, undoing changes, re-ordering changes, and more operations very easy.
 Do not use `git` here; if generic instructions mention `git`, translate them to the `jj` equivalent instead.
 
+**Never use `jj restore`** on files that the user is actively working on. This will discard their in-progress changes and they will lose work. If you need to revert a file you've modified, ask the user for approval.
+
 ## Automated Testing And Builds
 
 Tests are automated with `just`. QEMU is used for testing because there is no physical RISC-V machine available.
