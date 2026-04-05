@@ -17,7 +17,7 @@ qemu_flags := "-nographic -monitor none -machine virt -bios none -m 24M"
 asflags := "-march=rv64im -mabi=lp64"
 host_cflags := "-Oz -U_FORTIFY_SOURCE -g -DSYSTEM_POSIX=1"
 ldflags := "-Ttext=0x80000000 -e _start -march=rv64im -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none -Wl,--strip-all"
-ldflags_debug := "-Ttext=0x80000000 -e _start -march=rv64im -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none"
+# ldflags_debug := "-Ttext=0x80000000 -e _start -march=rv64im -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none"
 pass := f"echo {{GREEN}}{{BOLD}}PASS{{NORMAL}}; exit 0"
 fail := f"echo {{RED}}{{BOLD}}FAIL{{NORMAL}}; exit 1"
 
@@ -130,16 +130,10 @@ test_as0_riscv_tests: _build_dir _build_as0_host_ref
     done; \
     {{ pass }}
 
-hex0_debug_source := join(baremetal_dir, "GAS", "hex0.s")
-hex0_obj := join(build_dir, "hex0.o")
-hex0_debug_elf := join(build_dir, "hex0.debug.elf")
-
-debug_hex0: _build_dir
-    {{ as }} {{ asflags }} {{ hex0_debug_source }} -o {{ hex0_obj }}
-    {{ cc }} {{ ldflags_debug }} {{ hex0_obj }} -o {{ hex0_debug_elf }}
+debug_hex0: _hex0_bin
     rm -f qemu-dbg.in qemu-dbg.out
     mkfifo qemu-dbg.in qemu-dbg.out
-    {{ qemu }} {{ qemu_flags }} -serial pipe:qemu-dbg -kernel {{ hex0_debug_elf }} -gdb tcp::1234
+    {{ qemu }} -S {{ qemu_flags }} -serial pipe:qemu-dbg -kernel {{ hex0_bin_path }} -gdb tcp::1234
 
 clean:
     rm -rf {{ build_dir }}
