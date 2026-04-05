@@ -21,6 +21,16 @@ ldflags := "-Ttext=0x80000000 -e _start -march=rv64im -mabi=lp64 -mcmodel=medany
 pass := f"echo {{GREEN}}{{BOLD}}PASS{{NORMAL}}; exit 0"
 fail := f"echo {{RED}}{{BOLD}}FAIL{{NORMAL}}; exit 1"
 
+# This is the canonical test for the full bootstrap chain.
+test: _test_full_chain_stage2
+    hash_stage1=$({{ sha256sum }} {{ fullchain_as0_stage1_out }} | awk '{print $1}'); \
+    hash_stage2=$({{ sha256sum }} {{ as0_stage2_bin }} | awk '{print $1}'); \
+    if [[ "$hash_stage1" == "$hash_stage2" ]]; then \
+      {{ pass }}; \
+    else \
+      {{ fail }}; \
+    fi
+
 _build_dir:
     mkdir -p {{ build_dir }}
 as0_selfhost_harness_source := join(prototype_dir, "as0_selfhost_harness.c")
@@ -100,16 +110,6 @@ _run_as0_kernel kernel source out:
 _test_full_chain_stage1: _test_full_chain_prep (_run_full_chain fullchain_as0_stage1_out riscv64_defs_source as0_m1_source as0_stage_source)
 
 _test_full_chain_stage2: (_test_full_chain_stage1) (_run_as0_kernel fullchain_as0_stage1_out as0_stage_source as0_stage2_bin)
-
-# This is the canonical test for the full bootstrap chain.
-test: _test_full_chain_stage2
-    hash_stage1=$({{ sha256sum }} {{ fullchain_as0_stage1_out }} | awk '{print $1}'); \
-    hash_stage2=$({{ sha256sum }} {{ as0_stage2_bin }} | awk '{print $1}'); \
-    if [[ "$hash_stage1" == "$hash_stage2" ]]; then \
-      {{ pass }}; \
-    else \
-      {{ fail }}; \
-    fi
 
 test_as0_riscv_tests: _build_dir _build_as0_host_ref
     rm -f {{ join(build_dir, "riscv-tests-translate.log") }}; \
