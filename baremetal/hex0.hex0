@@ -25,11 +25,16 @@
 ; s1: toggle (1 = first nibble, 0 = second nibble)
 ; s2: pointer to code buffer
 
+; Memory layout:
+; Execution starts at 0x80000000 on QEMU
+; The code buffer starts right after the program
+; The stack is placed 8KB away from from the code buffer
+
 # _start: (0x0)
-    # Setup stack pointer with 0x1903
+    # Set stack pointer 0x3190 bytes from this instruction
     17 31 00 00       # auipc sp, 0x3
     13 01 01 19       # addi sp, sp, 0x190
-    # Setup code buffer pointer
+    # Set the code buffer pointer 0x1188 bytes from this instruction
     17 19 00 00       # auipc s2, 0x1
     13 09 89 18       # addi s2, s2, 0x188
     # Initialize toggle
@@ -127,17 +132,17 @@
     6F 00 C0 01       # jal x0, ignore_byte (0xDC)
 
 # ascii_num: (0xC4)
-    # Numbers are passed back as is
+    # Ascii numbers to hex
     13 05 05 FD       # addi a0, a0, -48
     67 80 00 00       # jalr x0, ra, 0
 
 # ascii_low: (0xCC)
-    # Simple ascii arithmetic. Lowercase 'a' through 'f' -87 gives us the hex number we want
+    # 'a'-'f' -> 10-15: subtract 87
     13 05 95 FA       # addi a0, a0, -87
     67 80 00 00       # jalr x0, ra, 0
 
 # ascii_high: (0xD4)
-    # Simple ascii arithmetic. Uppercase 'A' through 'F' -55 gives us the hex number we want
+    # 'A'-'F' -> 10-15: subtract -55
     13 05 95 FC       # addi a0, a0, -55
     67 80 00 00       # jalr x0, ra, 0
 
@@ -210,7 +215,7 @@
     13 0D 00 00       # addi s10, x0, 0
     93 0D 00 00       # addi s11, x0, 0
     # Jump to CODE_BASE (0x1190) using PC-relative addressing
-    # auipc captures the current PC (0x174) and adds one 4KB page -> 0x1174
+    # auipc captures the current PC (0x110) and adds one 4KB page -> 0x1174
     97 12 00 00       # auipc t0, 0x1
     # Adds 0x1C to bridge from 0x1174 to CODE_BASE (0x1190)
     93 82 C2 01       # addi t0, t0, 0x1C
