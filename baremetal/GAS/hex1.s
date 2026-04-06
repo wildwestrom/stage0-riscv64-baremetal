@@ -1,4 +1,3 @@
-## Copyright (C) 2021 Andrius Štikonas
 ## Copyright (C) 2026 Christian Westrom
 ## This file is part of stage0.
 ##
@@ -17,8 +16,8 @@
 
 
 # Register use:
-# s2: input buffer current position
-# s3: input buffer start (for rewinding)
+# s2: input buffer start (for rewinding)
+# s3: input buffer current position
 # s4: toggle
 # s5: hold
 # s6: ip
@@ -27,73 +26,67 @@
 # s9: input buffer end
 # s10: output buffer current position
 
+# Memory layout:
+# We start from the code buffer we jumped to in hex0
+#                  ----------
+#     entry point: 0x80001190
+#       stack_top: pc - 4
+#    input_buffer: 0x80100000
+#           table: input_buffer_end + 4
+#   output_buffer: input_buffer_end + 0x400
+
+.equ INPUT_BUFFER_START, 0x80100000
+.equ OUTPUT_BUFFER_OFFSET, 0x400
+
+# Phases:
+# This program works in multiple phases:
+# - Initialize registers
+# - Read input
+# - First pass: save label definitions
+# - Second pass: use label definitions to calculate offsets
+# - Clear registers
+# - Execute code
+
 .text
 .global _start
 _start:
-    # Compute our position in memory and set up buffers after our code
-    # We use fixed addresses in high memory to avoid conflicts
-    # Layout at 0x80100000:
-    #   table:        0x80100000 (2KB  = 0x800)
-    #   input_buffer: 0x80100800 (64KB = 0x10000)
-    #   output_buffer:0x80110800 (64KB = 0x10000)
-    #   stack_top:    0x80121800
+    # The previous program, hex0, is effectively dead code
+    # Since the stack grows downwards, we can just set it below this code
+		auipc t0, 0                  # get the program counter
+		addi sp, t0, -4               # set the stack pointer to that program counter
+    li s2, INPUT_BUFFER_START    # s2 = input_buffer_start
+    mv s3, s2                    # s3 = s2; set the cursor to the start
 
-    # Set up stack
-    li sp, 0x80121800
-
-    # Set up buffer pointers
-    li s2, 0x80100800            # input_buffer start
-    mv s3, s2                    # Save start of buffer
-
-read_input_loop:
-    jal read_uart                # Read a character from UART
+input_loop:
+    call read_uart               # Read a character from UART
     li t0, 4                     # Ctrl-D
     beq a0, t0, input_done       # Done reading input
-    sb a0, 0(s2)                 # Store byte in buffer
-    addi s2, s2, 1               # Advance buffer pointer
-    j read_input_loop
+    sb a0, 0(s3)                 # Store byte in buffer
+    addi s3, s3, 1               # Advance buffer pointer
+    j input_loop
 
 input_done:
-    mv s9, s2                    # Save end of input buffer
-    mv s2, s3                    # Reset to start of buffer
+    mv s9, s3                    # Save end of input buffer
+    mv s3, s2                    # Reset to start of buffer
+
+    # We have to align the bytes just in case
+    addi s9, s9, 3               # Round up
+    andi s9, s9, -4              # To the next byte boundary above the end of the input
 
     # Initialize globals
     li s4, -1                    # Toggle
     li s5, 0                     # Hold
     li s6, 0                     # Instruction Pointer
-
-    jal First_pass               # First pass
-
-    # Rewind input buffer
-    mv s2, s3                    # Reset to start of buffer
-
-    # Initialize globals
-    li s4, -1                    # Toggle
-    li s5, 0                     # Hold
-    li s6, 0                     # Instruction Pointer
-    li s7, 0                     # tempword
-    li s8, 0                     # Shift register
-    li s10, 0x80110800           # Output buffer pointer
-
-    jal Second_pass              # Now do the second pass
-
-    # Execute the assembled code
-    li t0, 0x80110800            # output_buffer
-    jr t0
 
 # First pass loop to determine addresses of labels
-First_pass:
-    addi sp, sp, -8              # Allocate stack
-    sd ra, 0(sp)                 # protect ra
-
 First_pass_loop:
-    bge s2, s9, First_pass_done  # Check if we've reached end of buffer
-    jal Read_byte                # Get another byte
+    bge s3, s9, First_pass_done  # Check if we've reached end of buffer
+    call Read_byte               # Get another byte
 
-    # Check for :
+    # Check for ':'
     li t1, 0x3a
     bne a0, t1, First_pass_0
-    jal StoreLabel               # Store this label
+    call StoreLabel              # Store this label
 
 First_pass_0:
     # Check for !
@@ -113,35 +106,38 @@ First_pass_0:
     beq a0, t1, Throwaway_token
 
     li a1, -1                    # write = false
-    jal DoByte                   # Deal with everything else
+    call DoByte                  # Deal with everything else
 
     j First_pass_loop            # Keep looping
 
 Throwaway_token:
     # Deal with Pointer to label
-    bge s2, s9, First_pass_done  # Check bounds before reading
-    jal Read_byte                # Drop the char
+    bge s3, s9, First_pass_done  # Check bounds before reading
+    call Read_byte               # Drop the char
     j First_pass_loop            # Loop again
 
 First_pass_done:
-    ld ra, 0(sp)                 # restore ra
-    addi sp, sp, 8               # deallocate stack
-    ret                          # return
+    # Rewind input buffer
+    mv s3, s2                    # Reset to start of buffer
 
-Second_pass:
-    addi sp, sp, -8              # Allocate stack
-    sd ra, 0(sp)                 # protect ra
+    # Initialize globals
+    li s4, -1                    # Toggle
+    li s5, 0                     # Hold
+    li s6, 0                     # Instruction Pointer
+    li s7, 0                     # tempword
+    li s8, 0                     # Shift register
+    addi s10, s9, OUTPUT_BUFFER_OFFSET # Set output buffer pointer to 1024 bytes after the end of the input buffer
 
 Second_pass_loop:
-    bge s2, s9, Second_pass_done # Check if we've reached end of buffer
-    jal Read_byte                # Read another byte
+    bge s3, s9, Second_pass_done # Check if we've reached end of buffer
+    call Read_byte               # Read another byte
 
     # Drop the label
     li t1, 0x3a
     bne a0, t1, Second_pass_0
 
-    bge s2, s9, Second_pass_done # Check bounds before reading
-    jal Read_byte                # Read the label
+    bge s3, s9, Second_pass_done # Check bounds before reading
+    call Read_byte               # Read the label
     j Second_pass_loop           # Continue looping
 
 Second_pass_0:
@@ -162,14 +158,14 @@ Second_pass_0:
     beq a0, t1, UpdateShiftRegister
 
     # Deal with everything else
-    mv a1, zero                  # write = true
-    jal DoByte                   # Process our char
+    mv a1, zero                  # write the character to the table
+    call DoByte                  # Process our char
 
     j Second_pass_loop           # continue looping
 
 UpdateShiftRegister:
     mv a1, a0                    # Store label prefix
-    jal Get_table_target         # Get target
+    call Get_table_target        # Get target
     ld a0, (a0)                  # Dereference pointer
     sub a0, a0, s6               # target - ip
 
@@ -193,9 +189,12 @@ UpdateShiftRegister:
 
 UpdateShiftRegister_I:
     # Corresponds to RISC-V I format
+
+    # tempword = ((value & 0xfff) << 20)             ; imm[11:0]
+
     addi a0, a0, 4               # add 4 due to this being 2nd part of AUIPC combo
 
-    li t1, 0xfff
+    li t1, 0xfff                 # set mask to 0xfff
     and t1, a0, t1               # (value & 0xfff)
     slli s7, t1, 20              # tempword = (value & 0xfff) << 20
     xor s8, s8, s7               # shiftregister = shiftregister ^ tempword
@@ -265,7 +264,9 @@ UpdateShiftRegister_J:
 
 UpdateShiftRegister_U:
     # Corresponds to RISC-V U format
-    # if value is 0x800 or more we have to add 11-th bit (0x1000) to compensate for signed extension
+
+    # tempword = (value & 0xfffff000)                 ; imm[31:12]
+    # if (value & 0xfff) >= 0x800: tempword += 0x1000 ; sign extension compensation
 
     li t0, 0x800
     li t1, 0xfff
@@ -284,10 +285,40 @@ UpdateShiftRegister_U_small:
     j Second_pass_loop           # Continue looping
 
 Second_pass_done:
-    ld ra, 0(sp)                 # restore ra
-    addi sp, sp, 8               # Deallocate stack
-    ret                          # return
+    # Second pass is complete so now we execute the code
 
+Execute_code:
+		## The output buffer is at the input_end +
+    addi t0, s9, OUTPUT_BUFFER_OFFSET # Set the jump address to start of the output_buffer
+
+    li a0, 0
+    li a1, 0
+    li a2, 0
+    li a3, 0
+    li a4, 0
+    li a5, 0
+    li a6, 0
+    li a7, 0
+    # Don't zero out t0 as it holds the assembled code
+    li t1, 0
+    li t2, 0
+    li t3, 0
+    li t4, 0
+    li t5, 0
+    li t6, 0
+    li s0, 0
+    li s1, 0
+    li s2, 0
+    li s3, 0
+    li s4, 0
+    li s5, 0
+    li s6, 0
+    li s7, 0
+    li s8, 0
+    li s9, 0
+    li s10, 0
+    li s11, 0
+    jr t0
 
 # DoByte function
 # Receives:
@@ -298,7 +329,7 @@ DoByte:
     addi sp, sp, -8              # Allocate stack
     sd ra, 0(sp)                 # protect ra
 
-    jal hex                      # Process hex, store it in a6
+    call hex                     # Process hex, store it in a6
 
     bltz a6, DoByte_Done         # Skip unrecognized characters
 
@@ -317,7 +348,7 @@ DoByte:
     xor t0, t0, a6               # hex(c) ^ sr_nextb
     slli t1, s5, 4               # hold * 16
     add a0, t0, t1               # (hold * 16) + hex(c) ^ sr_nextb()
-    jal write_byte                    # write byte to output
+    call write_byte              # write byte to output
 
 DoByte_1:
     addi s6, s6, 1               # Increment IP
@@ -396,8 +427,8 @@ ascii_other:
     li a6, -1                    # Return -1
     j hex_return                 # return
 ascii_comment:                   # Read the comment until newline
-    bge s2, s9, ascii_comment_done  # Check bounds
-    jal Read_byte
+    bge s3, s9, ascii_comment_done  # Check bounds
+    call Read_byte
     li t1, 0xd                   # CR
     beq a0, t1, ascii_comment_done
     li t1, 0xa                   # LF
@@ -411,10 +442,10 @@ hex_return:
     ret                          # return
 
 # Read byte from input buffer into a0
-# Caller must check s2 < s9 before calling
+# Caller must check s3 < s9 before calling
 Read_byte:
-    lb a0, 0(s2)                 # Load byte from buffer
-    addi s2, s2, 1               # Advance buffer pointer
+    lb a0, 0(s3)                 # Load byte from buffer
+    addi s3, s3, 1               # Advance buffer pointer
     ret                          # return
 
 # Read a character from UART into a0
@@ -435,9 +466,9 @@ Get_table_target:
     addi sp, sp, -8              # Allocate stack
     sd ra, 0(sp)                 # protect ra
 
-    jal Read_byte                # Get single char label
+    call Read_byte               # Get single char label
     slli a0, a0, 3               # Each label in table takes 8 bytes to store
-    li t0, 0x80100000            # table
+    addi t0, s9, 4               # Set table to the end of the input buffer + padding
     add a0, a0, t0               # Calculate offset
 
     ld ra, 0(sp)                 # restore ra
@@ -448,7 +479,7 @@ StoreLabel:
     addi sp, sp, -8              # Allocate stack
     sd ra, 0(sp)                 # protect ra
 
-    jal Get_table_target
+    call Get_table_target
     sd s6, (a0)                  # Store ip into table target
 
     ld ra, 0(sp)                 # restore ra
@@ -462,9 +493,7 @@ write_byte:
     sb a0, 0(s10)                # Write byte to output buffer
     addi s10, s10, 1             # Advance output pointer
     ret                          # return
-# PROGRAM END
-# Memory layout uses fixed addresses at 0x80100000+:
-#   table:        0x80100000 (2KB  = 0x800)
-#   input_buffer: 0x80100800 (64KB = 0x10000)
-#   output_buffer:0x80110800 (64KB = 0x10000)
-#   stack_top:    0x80121800
+
+done:
+    # Halt (infinite loop)
+    j done
