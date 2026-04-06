@@ -240,9 +240,7 @@ def decode_r(word: int, opcode: int) -> dict[str, object]:
             (0b111, 0b0000000): "and",
         }.get((funct3, funct7))
         if mnemonic is not None:
-            decoded = (
-                f"{mnemonic} {asm_reg_name(rd)}, {asm_reg_name(rs1)}, {asm_reg_name(rs2)}"
-            )
+            decoded = f"{mnemonic} {asm_reg_name(rd)}, {asm_reg_name(rs1)}, {asm_reg_name(rs2)}"
     elif opcode == 0x3B:
         mnemonic = {
             (0b000, 0b0000000): "addw",
@@ -252,9 +250,7 @@ def decode_r(word: int, opcode: int) -> dict[str, object]:
             (0b101, 0b0100000): "sraw",
         }.get((funct3, funct7))
         if mnemonic is not None:
-            decoded = (
-                f"{mnemonic} {asm_reg_name(rd)}, {asm_reg_name(rs1)}, {asm_reg_name(rs2)}"
-            )
+            decoded = f"{mnemonic} {asm_reg_name(rd)}, {asm_reg_name(rs1)}, {asm_reg_name(rs2)}"
     return {
         "type": "R",
         "fields": [
@@ -329,7 +325,7 @@ def decode_b(word: int, address: int, opcode: int) -> dict[str, object]:
             f"imm[11]=0b{imm11:b}",
             f"opcode=0x{opcode:02X}",
         ],
-        "decoded": f"{branch_name} {asm_reg_name(rs1)}, {asm_reg_name(rs2)}, 0x{target:04X}",
+        "decoded": f"{branch_name} {asm_reg_name(rs1)}, {asm_reg_name(rs2)}, 0x{target:0X}",
     }
 
 
@@ -353,7 +349,7 @@ def decode_j(word: int, address: int, opcode: int) -> dict[str, object]:
             f"rd={field_reg(rd)}",
             f"opcode=0x{opcode:02X}",
         ],
-        "decoded": f"jal {asm_reg_name(rd)}, 0x{target:04X}",
+        "decoded": f"jal {asm_reg_name(rd)}, 0x{target:0X}",
     }
 
 
@@ -400,7 +396,7 @@ def pair_note(
     if first.get("mnemonic") == "auipc":
         final_value = (first_address + upper_value + low_value) & 0xFFFFFFFF
         return (
-            f"# Combined intent at 0x{first_address:04X}-0x{second_address:04X}: "
+            f"# Combined intent at 0x{first_address:0X}-0x{second_address:0X}: "
             f"{pair_name} builds pc-relative {reg} = {format_hex(final_value)} "
             f"(PC + {format_hex(upper_value)} + {format_signed(low_value)})"
         )
@@ -410,7 +406,7 @@ def pair_note(
         if second.get("mnemonic") == "addiw":
             final_value = sign_extend(final_value & 0xFFFFFFFF, 32)
         return (
-            f"# Combined intent at 0x{first_address:04X}-0x{second_address:04X}: "
+            f"# Combined intent at 0x{first_address:0X}-0x{second_address:0X}: "
             f"{pair_name} builds {reg} = {format_hex(final_value, 64)} "
             f"({format_hex(upper_value)} + {format_signed(low_value)})"
         )
@@ -430,7 +426,7 @@ def annotate_instruction(line: str, address: int) -> list[str]:
     byte_text = " ".join(token.upper() for token in byte_tokens)
     fields_text = " ".join(f"[{field}]" for field in decoded["fields"])
     return [
-        f"{match.group('indent')}# Instruction at 0x{address:04X}: {decoded['decoded']}",
+        f"{match.group('indent')}# Instruction at 0x{address:0X}: {decoded['decoded']}",
         f"{match.group('indent')}# Hex (LE):  {byte_text}  →  Word: 0x{word:08X}",
         f"{match.group('indent')}# Binary: {grouped_binary_bytes(word)}",
         f"{match.group('indent')}# Fields: {fields_text}",
@@ -449,7 +445,14 @@ def annotate_lines(lines: list[str], source_name: str) -> tuple[list[str], int]:
             word = int.from_bytes(
                 bytes(int(token, 16) for token in byte_tokens), byteorder="little"
             )
-            decoded_instructions.append((index, address, instruction_match.group("indent"), decode_instruction(word, address)))
+            decoded_instructions.append(
+                (
+                    index,
+                    address,
+                    instruction_match.group("indent"),
+                    decode_instruction(word, address),
+                )
+            )
             address += 4
 
     # Build index → decoded dict for O(1) lookup during validation
@@ -503,7 +506,7 @@ def annotate_lines(lines: list[str], source_name: str) -> tuple[list[str], int]:
                         actual: int = int(dec["target"])  # type: ignore[arg-type]
                         if actual != hint_addr:
                             msg = (
-                                f"# TARGET MISMATCH at 0x{decoded_addr_by_line[index]:04X}: "
+                                f"# TARGET MISMATCH at 0x{decoded_addr_by_line[index]:0X}: "
                                 f"comment says 0x{hint_addr:X} but instruction encodes 0x{actual:X}"
                             )
                             output.append(f"{instruction_match.group('indent')}{msg}")
