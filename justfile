@@ -16,13 +16,13 @@ qemu := require("qemu-system-riscv64-purecap")
 qemu_flags := "-nographic -monitor none -machine virt -bios none -m 24M"
 asflags := "-march=rv64im -mabi=lp64"
 host_cflags := "-Oz -U_FORTIFY_SOURCE -g -DSYSTEM_POSIX=1"
-ldflags := "-Ttext=0x80000000 -e _start -march=rv64im -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none -Wl,--strip-all"
-# ldflags_debug := "-Ttext=0x80000000 -e _start -march=rv64im -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none"
+ldflags := "-e _start -march=rv64im -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none -Wl,--strip-all"
+ldflags_debug := "-e _start -march=rv64im -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none"
 pass := f"echo {{GREEN}}{{BOLD}}PASS{{NORMAL}}; exit 0"
 fail := f"echo {{RED}}{{BOLD}}FAIL{{NORMAL}}; exit 1"
 
 # This is the canonical test for the full bootstrap chain.
-test: _test_full_chain_stage2
+test: clean _test_full_chain_stage2
     hash_stage1=$({{ sha256sum }} {{ fullchain_as0_stage1_out }} | awk '{print $1}'); \
     hash_stage2=$({{ sha256sum }} {{ as0_stage2_bin }} | awk '{print $1}'); \
     if [[ "$hash_stage1" == "$hash_stage2" ]]; then \
@@ -44,7 +44,7 @@ as0_host_ref := join(build_dir, "as0-host-ref")
 
 _build_as0_stage0: _build_dir
     {{ as }} {{ asflags }} {{ as0_stage_source }} -o {{ as0_stage0_obj }}
-    {{ cc }} {{ ldflags }} {{ as0_stage0_obj }} -o {{ as0_stage0_elf }}
+    {{ cc }} {{ ldflags }} -Ttext=0x80000000 {{ as0_stage0_obj }} -o {{ as0_stage0_elf }}
     {{ objcopy }} -O binary {{ as0_stage0_elf }} {{ as0_stage0_bin }}
 
 _build_as0_host_ref: _build_dir
@@ -79,6 +79,19 @@ fullchain_as0_stage1_out := join(build_dir, "fullchain-as0-stage1.bin")
 
 _test_full_chain_prep: _hex0_bin _build_as0_stage0
     rm -f {{ fullchain_as0_stage1_out }} {{ as0_stage2_bin }}
+
+# BEGIN temporary machinery to slot in the GAS version of hex1 for testing
+hex1_gas_hex0_source := join(build_dir, "hex1_gas.hex0")
+
+_build_hex1_gas: _build_dir
+    {{ as }} {{ asflags }} {{ join(baremetal_dir, "GAS", "hex1.s") }} -o {{ join(build_dir, "hex1_gas.o") }}
+    {{ cc }} {{ ldflags_debug }} -Ttext=0x0 {{ join(build_dir, "hex1_gas.o") }} -o {{ join(build_dir, "hex1_gas.elf") }}
+    {{ objcopy }} -O binary {{ join(build_dir, "hex1_gas.elf") }} {{ join(build_dir, "hex1_gas.bin") }}
+
+_hex1_gas_bin: _build_hex1_gas
+    {{ join(scripts_dir, "bin_to_hex0.sh") }} {{ join(build_dir, "hex1_gas.bin") }} {{ hex1_gas_hex0_source }}
+
+# END temporary test machinery
 
 _run_full_chain out payload_a payload_b source:
     status=0; \
@@ -130,10 +143,11 @@ test_as0_riscv_tests: _build_dir _build_as0_host_ref
     done; \
     {{ pass }}
 
-debug_hex0: _hex0_bin
+debug_hex1: _hex0_bin _hex1_gas_bin
     rm -f qemu-dbg.in qemu-dbg.out
     mkfifo qemu-dbg.in qemu-dbg.out
-    {{ qemu }} -S {{ qemu_flags }} -serial pipe:qemu-dbg -kernel {{ hex0_bin_path }} -gdb tcp::1234
+    {{ qemu }} -S {{ qemu_flags }} -serial pipe:qemu-dbg -kernel {{ hex0_bin_path }} -gdb tcp::1234 -d int,guest_errors -D debug.log
+    # At this point load in hex1.hex0 and hex2.hex1 for testing
 
 clean:
     rm -rf {{ build_dir }}
