@@ -104,6 +104,7 @@ I made heavy use of LLMs in doing this and I'm not proud. Yes, I understand that
 ### Audit progress
 
 - `hex0.hex0`: It is arguably the most important one as we build everything on top of it.
+- `hex1.hex0`: The next step in the chain.
 
 ## Relevant Links
 

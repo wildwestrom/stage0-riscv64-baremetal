@@ -17,6 +17,8 @@
 # hex1 - a hex monitor that supports single-character labels and branches
 # Instruction words are written in little-endian byte order for hex0.
 
+# Audited by Christian Westrom: 2026-04-09 05:00 UTC
+
 ; Register use:
 ; s2: input buffer start (for rewinding)
 ; s3: input buffer current position
