@@ -28,30 +28,31 @@
 # s9: malloc pointer (heap)
 # s10: updates
 # s11: input buffer end
+# gp: scratch buffer base
 
 # Struct format: (size 24)
 # next => 0                      # Next element in linked list
 # target => 8                    # Target (ip)
 # name => 16                     # Label name
 
-# Memory layout at 0x80100000:
-#   heap:         0x80100000 (256KB = 0x40000) - for label structs and names
-#   input_buffer: 0x80140000 (256KB = 0x40000)
-#   output_buffer:0x80180000 (256KB = 0x40000)
-#   scratch:      0x801C0000 (4KB   = 0x1000)
-#   stack_top:    0x801C2000
+# Memory layout (relative to BASE = load address of _start):
+#   stack:        BASE - 4                              grows downward
+#   input_buffer: BASE + INPUT_BUFFER_OFFSET
+#   heap:         end_of_input + 0                      (256KB)
+#   scratch:      end_of_input + HEAP_SIZE              (4KB)
+#   output:       end_of_input + HEAP_SIZE + SCRATCH_SIZE
+
+.equ INPUT_BUFFER_OFFSET, 0x4000    # 16KB: clears ~4KB compiled program
+.equ HEAP_SIZE,           0x40000   # 256KB
+.equ SCRATCH_SIZE,        0x1000    # 4KB
 
 .text
 .global _start
 _start:
-    # Set up stack
-    li sp, 0x801C2000
-
-    # Initialize heap pointer
-    li s9, 0x80100000            # malloc pointer
-
-    # Set up buffer pointers
-    li s2, 0x80140000            # input_buffer start
+    auipc t0, 0
+    addi sp, t0, -4
+    lui t1, (INPUT_BUFFER_OFFSET >> 12)
+    add s2, t0, t1               # input_buffer start
     mv s3, s2                    # Save start of buffer
 
 read_input_loop:
@@ -65,6 +66,9 @@ read_input_loop:
 input_done:
     mv s11, s2                   # Save end of input buffer
     mv s2, s3                    # Reset to start of buffer
+    mv s9, s11
+    lui t0, (HEAP_SIZE >> 12)
+    add gp, s11, t0              # scratch buffer base
 
     # Initialize globals
     li s4, -1                    # Toggle
@@ -87,7 +91,8 @@ input_done:
     jal Second_pass              # Now do the second pass
 
     # Execute the assembled code
-    li t0, 0x80180000            # output_buffer
+    lui t0, ((HEAP_SIZE + SCRATCH_SIZE) >> 12)
+    add t0, s11, t0              # output_buffer
     jr t0
 
 # First pass loop to determine addresses of labels
@@ -143,7 +148,7 @@ First_pass_loop:
     j First_pass_loop            # Keep looping
 
 Throwaway_token:
-    li a1, 0x801C0000            # scratch address
+    mv a1, gp                    # scratch address
     jal consume_token            # Read token
     jal ClearScratch             # Throw away token
     j First_pass_loop            # Loop again
@@ -151,14 +156,14 @@ Throwaway_token:
 First_pass_pointer:
     addi s6, s6, 4               # Update ip
     # Deal with Pointer to label
-    li a1, 0x801C0000            # scratch address
+    mv a1, gp                    # scratch address
     jal consume_token            # Read token
     jal ClearScratch             # Throw away token
     li t1, 0x3e                  # Check for '>'
     bne a0, t1, First_pass_loop  # Loop again
 
     # Deal with %label>label case
-    li a1, 0x801C0000            # scratch address
+    mv a1, gp                    # scratch address
     jal consume_token            # Read token
     jal ClearScratch             # Throw away token
     j First_pass_loop            # Loop again
@@ -189,7 +194,8 @@ Second_pass:
     sd ra, 0(sp)                 # protect ra
 
     # Initialize output buffer pointer
-    li a7, 0x80180000            # output_buffer - use a7 as output pointer
+    lui t0, ((HEAP_SIZE + SCRATCH_SIZE) >> 12)
+    add a7, s11, t0              # output_buffer - use a7 as output pointer
 
 Second_pass_loop:
     bge s2, s11, Second_pass_done # Check if we've reached end of buffer
@@ -199,7 +205,7 @@ Second_pass_loop:
     li t1, 0x3a
     bne a0, t1, Second_pass_0
 
-    li a1, 0x801C0000            # scratch address
+    mv a1, gp                    # scratch address
     jal consume_token            # Read the label
     jal ClearScratch             # Throw away token
 
@@ -264,7 +270,7 @@ Second_pass_UpdateWord_loop:
 
 UpdateShiftRegister:
     mv a2, a0                    # Store label prefix
-    li a1, 0x801C0000            # Get scratch
+    mv a1, gp                    # Get scratch
     jal ClearScratch             # Clear scratch
     jal consume_token            # Read token
     jal GetTarget                # Get target
@@ -417,7 +423,7 @@ StorePointer:
     addi s6, s6, 4               # Update ip
     mv a2, a0                    # Store label prefix
 
-    li a1, 0x801C0000            # Get scratch
+    mv a1, gp                    # Get scratch
     jal ClearScratch             # clear scratch
     jal consume_token            # consume token
     mv a5, a0                    # save char
@@ -454,7 +460,7 @@ StorePointer_loop:
 
 StorePointer_1:
     mv a2, a1                    # save target
-    li a1, 0x801C0000            # Get scratch
+    mv a1, gp                    # Get scratch
     jal ClearScratch             # clear scratch
     jal consume_token            # consume token
     jal GetTarget                # Get target
@@ -503,7 +509,7 @@ ClearScratch:
     sd a0, 8(sp)                 # protect a0
     sd a1, 16(sp)                # protect a1
 
-    li a0, 0x801C0000            # scratch address
+    mv a0, gp                    # scratch address
 
 ClearScratch_loop:
     lb a1, (a0)                  # Read current byte: s[i]
@@ -718,7 +724,7 @@ GetTarget:
 
 GetTarget_loop_0:
     # Compare the strings
-    li t1, 0x801C0000            # scratch
+    mv t1, gp                    # scratch
     ld t2, 16(t0)                # I->name
 GetTarget_loop:
     lbu t4, (t2)                 # I->name[i]

@@ -77,10 +77,10 @@ riscv64_defs_source := join(baremetal_dir, "riscv64_defs.M1")
 as0_m1_source := join(baremetal_dir, "as0.M1")
 fullchain_as0_stage1_out := join(build_dir, "fullchain-as0-stage1.bin")
 
-_test_full_chain_prep: _hex0_bin _build_as0_stage0
+_test_full_chain_prep: _hex0_bin _build_as0_stage0 _hex2_gas_bin
     rm -f {{ fullchain_as0_stage1_out }} {{ as0_stage2_bin }}
 
-# BEGIN temporary machinery to slot in the GAS version of hex1 for testing
+# BEGIN temporary machinery to slot in the GAS versions of hex1 and hex2 for testing
 hex1_gas_hex0_source := join(build_dir, "hex1_gas.hex0")
 
 _build_hex1_gas: _build_dir
@@ -91,6 +91,15 @@ _build_hex1_gas: _build_dir
 _hex1_gas_bin: _build_hex1_gas
     {{ join(scripts_dir, "bin_to_hex0.sh") }} {{ join(build_dir, "hex1_gas.bin") }} {{ hex1_gas_hex0_source }}
 
+hex2_gas_hex0_source := join(build_dir, "hex2_gas.hex0")
+
+_build_hex2_gas: _build_dir
+    {{ as }} {{ asflags }} {{ join(baremetal_dir, "GAS", "hex2.s") }} -o {{ join(build_dir, "hex2_gas.o") }}
+    {{ cc }} {{ ldflags_debug }} -Ttext=0x0 {{ join(build_dir, "hex2_gas.o") }} -o {{ join(build_dir, "hex2_gas.elf") }}
+    {{ objcopy }} -O binary {{ join(build_dir, "hex2_gas.elf") }} {{ join(build_dir, "hex2_gas.bin") }}
+
+_hex2_gas_bin: _build_hex2_gas
+    {{ join(scripts_dir, "bin_to_hex0.sh") }} {{ join(build_dir, "hex2_gas.bin") }} {{ hex2_gas_hex0_source }}
 # END temporary test machinery
 
 _run_full_chain out payload_a payload_b source:

@@ -43,35 +43,26 @@
 ; s9: malloc pointer (heap)
 ; s10: updates
 ; s11: input buffer end
+; gp: scratch buffer base
 
 # Struct format: (size 24)
 # next => 0                      # Next element in linked list
 # target => 8                    # Target (ip)
 # name => 16                     # Label name
 
-# Memory layout at 0x80100000:
-#   heap:         0x80100000 (256KB = 0x40000) - for label structs and names
-#   input_buffer: 0x80140000 (256KB = 0x40000)
-#   output_buffer:0x80180000 (256KB = 0x40000)
-#   scratch:      0x801C0000 (4KB   = 0x1000)
-#   stack_top:    0x801C2000
+# Memory layout (relative to BASE = load address of _start):
+#   stack:        BASE - 4                              grows downward
+#   input_buffer: BASE + INPUT_BUFFER_OFFSET
+#   heap:         end_of_input + 0                      (256KB)
+#   scratch:      end_of_input + HEAP_SIZE              (4KB)
+#   output:       end_of_input + HEAP_SIZE + SCRATCH_SIZE
 
 
 # _start:
-    # Set up stack pointer (sp = 0x801C2000)
-    37 01 04 00       # lui sp, 0x40
-    1B 01 11 0E       # addiw sp, sp, 225             ; 0x400e1
-    13 11 D1 00       # slli sp, sp, 0xd              ; 0x801C2000
-
-    # Set up malloc pointer (s9 = 0x80100000)
-    B7 1C 00 00       # lui s9, 0x1
-    9B 8C 1C 80       # addiw s9, s9, -2047           ; 0x801
-    93 9C 4C 01       # slli s9, s9, 0x14             ; 0x80100000
-
-    # Set up input buffer pointer (s2 = s3 = 0x80140000)
-    37 29 00 00       # lui s2, 0x2
-    1B 09 59 00       # addiw s2, s2, 5               ; 0x2005
-    13 19 29 01       # slli s2, s2, 0x12             ; 0x80140000
+    97 02 00 00       # auipc t0, 0                   ; t0 = BASE (load address)
+    13 81 C2 FF       # addi sp, t0, -4               ; sp = BASE - 4 (stack top)
+    37 43 00 00       # lui t1, 4                     ; t1 = 0x4000 (INPUT_BUFFER_OFFSET)
+    33 89 62 00       # add s2, t0, t1                ; s2 = BASE + 0x4000
     93 09 09 00       # addi s3, s2, 0                ; s3 = s2 (save start)
 
 
@@ -91,6 +82,9 @@
 :B
     93 0D 09 00       # addi s11, s2, 0               ; s11 = end of input
     13 89 09 00       # addi s2, s3, 0                ; s2 = start of input (rewind)
+    93 8C 0D 00       # addi s9, s11, 0               ; s9 = s11 (heap = end of input)
+    B7 02 04 00       # lui t0, 0x40                  ; t0 = HEAP_SIZE (0x40000)
+    B3 81 5D 00       # add gp, s11, t0               ; gp = scratch base
 
     # Initialize globals for first pass
     13 0A F0 FF       # addi s4, x0, -1               ; toggle = -1 (true)
@@ -110,10 +104,9 @@
 
     $J EF 00 00 00    # jal ra, Second_pass           ; Run second pass
 
-    # Jump to output buffer to execute assembled code (0x80180000)
-    B7 12 00 00       # lui t0, 0x1
-    9B 82 32 00       # addiw t0, t0, 3               ; 0x1003
-    93 92 32 01       # slli t0, t0, 0x13             ; 0x80180000
+    # Jump to output buffer to execute assembled code
+    B7 12 04 00       # lui t0, 0x41                  ; t0 = HEAP_SIZE + SCRATCH_SIZE
+    B3 82 5D 00       # add t0, s11, t0               ; t0 = output buffer base
     67 80 02 00       # jalr x0, t0, 0                ; Jump to output
 
 
@@ -179,9 +172,7 @@
 # Throwaway_token:
 # Read and discard label token (for @, $, !, ~)
 :E
-    B7 25 00 00       # lui a1, 0x2
-    9B 85 75 00       # addiw a1, a1, 7               ; 0x2007
-    93 95 25 01       # slli a1, a1, 0x12             ; a1 = 0x801C0000 (scratch)
+    93 85 01 00       # addi a1, gp, 0                ; a1 = scratch base (gp)
     $f EF 00 00 00    # jal ra, consume_token         ; Read token into scratch
     $d EF 00 00 00    # jal ra, ClearScratch          ; Clear scratch
     $D 6F 00 00 00    # jal x0, First_pass_loop       ; Continue loop
@@ -191,9 +182,7 @@
 # Handle % and & pointer references (4 bytes each)
 :F
     13 0B 4B 00       # addi s6, s6, 4                ; ip += 4
-    B7 25 00 00       # lui a1, 0x2
-    9B 85 75 00       # addiw a1, a1, 7               ; 0x2007
-    93 95 25 01       # slli a1, a1, 0x12             ; a1 = 0x801C0000 (scratch)
+    93 85 01 00       # addi a1, gp, 0                ; a1 = scratch base (gp)
     $f EF 00 00 00    # jal ra, consume_token         ; Read first token
     $d EF 00 00 00    # jal ra, ClearScratch          ; Clear scratch
 
@@ -202,9 +191,7 @@
     @D 63 10 65 00    # bne a0, t1, First_pass_loop   ; If not '>', continue
 
     # Handle second label in %label>label
-    B7 25 00 00       # lui a1, 0x2
-    9B 85 75 00       # addiw a1, a1, 7               ; 0x2007
-    93 95 25 01       # slli a1, a1, 0x12             ; a1 = 0x801C0000 (scratch)
+    93 85 01 00       # addi a1, gp, 0                ; a1 = scratch base (gp)
     $f EF 00 00 00    # jal ra, consume_token         ; Read second token
     $d EF 00 00 00    # jal ra, ClearScratch          ; Clear scratch
     $D 6F 00 00 00    # jal x0, First_pass_loop       ; Continue loop
@@ -244,10 +231,9 @@
     13 01 81 FF       # addi sp, sp, -8               ; Allocate stack
     23 30 11 00       # sd ra, 0(sp)                  ; Save return address
 
-    # Set up output pointer (a7 = 0x80180000)
-    B7 18 00 00       # lui a7, 0x1
-    9B 88 38 00       # addiw a7, a7, 3               ; 0x1003
-    93 98 38 01       # slli a7, a7, 0x13             ; 0x80180000
+    # Set up output pointer (a7 = end_of_input + HEAP_SIZE + SCRATCH_SIZE)
+    B7 12 04 00       # lui t0, 0x41                  ; t0 = HEAP_SIZE + SCRATCH_SIZE
+    B3 88 5D 00       # add a7, s11, t0               ; a7 = output buffer base
 
 
 # Second_pass_loop:
@@ -260,9 +246,7 @@
     @L 63 10 65 00    # bne a0, t1, Second_pass_0     ; If not ':', continue
 
     # Skip label token
-    B7 25 00 00       # lui a1, 0x2
-    9B 85 75 00       # addiw a1, a1, 7               ; 0x2007
-    93 95 25 01       # slli a1, a1, 0x12             ; a1 = 0x801C0000 (scratch)
+    93 85 01 00       # addi a1, gp, 0                ; a1 = scratch base (gp)
     $f EF 00 00 00    # jal ra, consume_token         ; Read and discard token
     $d EF 00 00 00    # jal ra, ClearScratch          ; Clear scratch
     $K 6F 00 00 00    # jal x0, Second_pass_loop      ; Continue loop
@@ -332,9 +316,7 @@
 # Calculate displacement and encode according to instruction format
 :O
     13 06 05 00       # addi a2, a0, 0                ; a2 = prefix character
-    B7 25 00 00       # lui a1, 0x2
-    9B 85 75 00       # addiw a1, a1, 7               ; 0x2007
-    93 95 25 01       # slli a1, a1, 0x12             ; a1 = 0x801C0000 (scratch)
+    93 85 01 00       # addi a1, gp, 0                ; a1 = scratch base (gp)
     $d EF 00 00 00    # jal ra, ClearScratch          ; Clear scratch
     $f EF 00 00 00    # jal ra, consume_token         ; Read label into scratch
     $0 EF 00 00 00    # jal ra, GetTarget             ; Get label address
@@ -495,9 +477,7 @@
 :V
     13 0B 4B 00       # addi s6, s6, 4                ; ip += 4
     13 06 05 00       # addi a2, a0, 0                ; a2 = prefix character
-    B7 25 00 00       # lui a1, 0x2
-    9B 85 75 00       # addiw a1, a1, 7               ; 0x2007
-    93 95 25 01       # slli a1, a1, 0x12             ; a1 = 0x801C0000 (scratch)
+    93 85 01 00       # addi a1, gp, 0                ; a1 = scratch base (gp)
     $d EF 00 00 00    # jal ra, ClearScratch          ; Clear scratch
     $f EF 00 00 00    # jal ra, consume_token         ; Read label into scratch
     93 07 05 00       # addi a5, a0, 0                ; a5 = terminating char
@@ -539,9 +519,7 @@
 # Handle %label>label - displacement between two labels
 :Y
     13 86 05 00       # addi a2, a1, 0                ; a2 = first target
-    B7 25 00 00       # lui a1, 0x2
-    9B 85 75 00       # addiw a1, a1, 7               ; 0x2007
-    93 95 25 01       # slli a1, a1, 0x12             ; a1 = 0x801C0000 (scratch)
+    93 85 01 00       # addi a1, gp, 0                ; a1 = scratch base (gp)
     $d EF 00 00 00    # jal ra, ClearScratch          ; Clear scratch
     $f EF 00 00 00    # jal ra, consume_token         ; Read second label
     $0 EF 00 00 00    # jal ra, GetTarget             ; Get second label address
@@ -594,7 +572,7 @@
 
 # =====================================================================
 # ClearScratch:
-# Zero the scratch area at 0x801C0000
+# Zero the scratch area (gp)
 # =====================================================================
 :d
     13 01 81 FE       # addi sp, sp, -24              ; Allocate stack
@@ -602,10 +580,8 @@
     23 34 A1 00       # sd a0, 8(sp)                  ; Save a0
     23 38 B1 00       # sd a1, 16(sp)                 ; Save a1
 
-    # Set up scratch pointer (a0 = 0x801C0000)
-    37 25 00 00       # lui a0, 0x2
-    1B 05 75 00       # addiw a0, a0, 7               ; 0x2007
-    13 15 25 01       # slli a0, a0, 0x12             ; 0x801C0000
+    # Set up scratch pointer (a0 = gp)
+    13 85 01 00       # addi a0, gp, 0                ; a0 = scratch base (gp)
 
 # ClearScratch_loop:
 :e
@@ -881,9 +857,7 @@
 # GetTarget_loop_0:
 # Outer loop: iterate through linked list
 :1
-    37 23 00 00       # lui t1, 0x2
-    1B 03 73 00       # addiw t1, t1, 7               ; 0x2007
-    13 13 23 01       # slli t1, t1, 0x12             ; t1 = scratch (0x801C0000)
+    13 83 01 00       # addi t1, gp, 0                ; t1 = scratch base (gp)
     83 B3 02 01       # ld t2, 16(t0)                 ; t2 = entry->name
 
 
