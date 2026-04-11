@@ -52,6 +52,7 @@ See also: [git.sr.ht/~oriansj/bootstrappable-wiki/tree/wiki/item/stage0.md](http
 - **hex1**: hex0 + single-character labels
 - **hex2**: hex1 + multi-character labels, relative pointers , word literals, alignment padding
 - **M0**: Platform-specific macro assembler — adds `DEFINE name hex`, expands macros, resolves hex2-style labels/immediates, assembles in memory, and executes directly
+- **as0**: A real assembler that supports a minimal subset of GNU assembler (GAS) syntax.
 
 We keep several reference artifacts for comparison/debugging that are not part of the real bootstrap chain.
 

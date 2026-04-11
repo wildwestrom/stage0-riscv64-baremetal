@@ -2,17 +2,17 @@
 
 ## Comments
 
-Comments are extremely important. Much of this repository is opaque machine code and assembly. Comments are critical for both humans and LLMs to understand what is happening to registers, memory, and the stack.
+Comments critical. Repo full of opaque machine code/assembly. Comments needed for humans+LLMs to understand registers, memory, stack.
 
-If a comment is misleading or does not match what the code actually does, rewrite it so it matches reality. Incorrect comments undermine auditability and will mislead future readers.
+Misleading/wrong comments: rewrite to match reality. Wrong comments break auditability, mislead future readers.
 
 ## File Extensions
 
-According to the stage0 project, macro assembler source files should use the `.M1` extension:
+stage0 project: macro assembler source uses `.M1` extension:
 
 <https://git.sr.ht/~oriansj/bootstrappable-wiki/blob/wiki/stage0.md>
 
-Stage0 uses file extensions to signal the level of infrastructure required to build a file:
+Stage0 file extensions signal infrastructure level needed to build:
 
 > File extensions are very important in stage0, they directly indicate the level of infrastructure
 > required to build them.
@@ -26,10 +26,10 @@ Stage0 uses file extensions to signal the level of infrastructure required to bu
 
 ## Annotated Hex
 
-Use `just annotate_hex0` and `just annotate_hex1` to generate heavily annotated versions of hex machine code.
+Use `just annotate_hex0` and `just annotate_hex1` for heavily annotated hex machine code versions.
 
-These commands validate jump and label addresses and try to break each instruction down byte by byte.
+Commands validate jump/label addresses, break instructions byte-by-byte.
 
 ## C Source
 
-C is used for high-level prototypes of programs that will eventually be hand-audited and translated from their assembly output. Because of this, C programs should not be clever, limit macro use, and generate small binaries with obvious control flow.
+C = high-level prototypes, later hand-audited and translated from assembly output. C code: no cleverness, minimal macros, small binaries, obvious control flow.

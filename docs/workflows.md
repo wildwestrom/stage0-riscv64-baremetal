@@ -2,24 +2,24 @@
 
 ## Jujutsu Enchanced Version Control
 
-Jujutsu is available to make tracking changes, undoing changes, re-ordering changes, and more operations very easy.
-Do not use `git` here; if generic instructions mention `git`, translate them to the `jj` equivalent instead.
+Jujutsu available for tracking/undoing/reordering changes.
+No `git`; translate to `jj` equivalent.
 
-**Never use `jj restore`** on files that the user is actively working on. This will discard their in-progress changes and they will lose work. If you need to revert a file you've modified, ask the user for approval.
+**Never use `jj restore`** on files user actively edits. Discards in-progress work. To revert modified file, ask user approval.
 
 ## Automated Testing And Builds
 
-Tests are automated with `just`. QEMU is used for testing because there is no physical RISC-V machine available.
+Tests automated with `just`. QEMU used for testing; no physical RISC-V available.
 
-Use `just` recipes instead of writing ad hoc shell commands by hand. If a command you need is not in the [`justfile`](../justfile) and it is complicated enough to reuse or get wrong, add a new recipe.
+Use `just` recipes over ad hoc shell commands. Missing needed command + complex enough to reuse/get wrong → add new recipe.
 
-The canonical merge-gating test is `just test`. Use `just test_as0_riscv_tests` as the secondary compatibility check for the current host-reference assembler path.
+Canonical merge-gating test: `just test`. Secondary compatibility check: `just test_as0_riscv_tests`.
 
-The `scripts/generate_as0_m1.py` helper is the exception: keep it off the normal `just` surface and treat it as a last-resort analysis or regeneration aid for `baremetal/as0.M1`, not as part of the everyday build flow.
+`scripts/generate_as0_m1.py`: keep off normal `just` surface. Last-resort analysis/regeneration aid for `baremetal/as0.M1` only.
 
 ## Discovery
 
-Use `tree` to understand the repository structure. Prefer this form for less noisy output:
+Use `tree` for repo structure. Preferred form:
 
 ```sh
 tree --gitignore -I reference
@@ -27,7 +27,7 @@ tree --gitignore -I reference
 
 ## Disassembling For Reference
 
-To get assembly reference from a `.s` file, use this flow:
+Assembly reference from `.s` file:
 
 ```sh
 riscv64-none-elf-as -march=rv64im -mabi=lp64 uart_echo/echo.s -o build/echo.o \
@@ -37,4 +37,4 @@ build/echo.o -o build/echo.elf \
 && riscv64-none-elf-objdump -d build/echo.elf
 ```
 
-`objdump` shows instruction words as big-endian hex, for example `00040137`. For hex0 format, reverse the bytes: `00040137` becomes `37 01 04 00`.
+`objdump` shows instruction words as big-endian hex, e.g. `00040137`. hex0 format: reverse bytes → `37 01 04 00`.
