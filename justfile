@@ -18,8 +18,8 @@ asflags := "-march=rv64im -mabi=lp64"
 host_cflags := "-Oz -U_FORTIFY_SOURCE -g -DSYSTEM_POSIX=1"
 ldflags := "-e _start -march=rv64im -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none -Wl,--strip-all"
 ldflags_debug := "-e _start -march=rv64im -mabi=lp64 -mcmodel=medany -nostdlib -static -Wl,--gc-sections -Wl,--build-id=none"
-pass := f"echo {{GREEN}}{{BOLD}}PASS{{NORMAL}}; exit 0"
-fail := f"echo {{RED}}{{BOLD}}FAIL{{NORMAL}}; exit 1"
+pass := "echo " + GREEN + BOLD + "PASS" + NORMAL + "; exit 0"
+fail := "echo " + RED + BOLD + "FAIL" + NORMAL + "; exit 1"
 
 # This is the canonical test for the full bootstrap chain.
 test: clean _test_full_chain_stage2
