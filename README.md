@@ -36,7 +36,7 @@ This project follows the [`stage0`](https://github.com/oriansj/stage0) bootstrap
 
 ## Where We're At
 
-The bootstrap chain has been tested on QEMU with [CHERI (Capability Hardware Enhanced RISC Instructions)](https://www.cl.cam.ac.uk/research/security/ctsrd/cheri/) support. An instruction set extension that adds capability-based security at the hardware level. I don't fully understand it. Just know it's important for later.
+The bootstrap chain has been tested on QEMU.
 
 The full chain:
 
@@ -62,9 +62,13 @@ We keep several reference artifacts for comparison/debugging that are not part o
 
 A POSIX environment with:
 
-- `qemu-system-riscv64` with CHERI support (the binary is called `qemu-system-riscv64-purecap`)
-- `riscv64-none-elf-gcc` (and binutils: `as`, `objcopy`)
-- `riscv64-none-elf-gdb` (for debugging)
+- `qemu-system-riscv64`
+- Binutils for RISC-V64
+	- `riscv64-none-elf-gcc`
+	- `riscv64-none-elf-as`
+	- `riscv64-none-elf-objcopy`
+	- `riscv64-none-elf-gdb`
+	- etc.
 - `just` (command runner)
 - Standard POSIX utilities (`sed`, `tr`, `xxd`, `grep`, `bash`)
 

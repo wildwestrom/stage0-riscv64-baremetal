@@ -3,21 +3,21 @@
 
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
-    qemu-cheri-flake.url = "github:wildwestrom/qemu-cheri-flake";
+    # qemu-cheri-flake.url = "github:wildwestrom/qemu-cheri-flake";
   };
 
   outputs =
     {
       nixpkgs,
       flake-utils,
-      qemu-cheri-flake,
+      # qemu-cheri-flake,
       ...
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        qemu-cheri = qemu-cheri-flake.packages.${system}.default;
+        # qemu-cheri = qemu-cheri-flake.packages.${system}.default;
       in
       {
         legacyPackages = pkgs;
@@ -25,7 +25,8 @@
           name = "stage0-riscv64-test";
           src = ./.;
           nativeBuildInputs = [
-            qemu-cheri
+            # qemu-cheri
+            pkgs.qemu
             pkgs.just
             pkgs.unixtools.xxd
           ];
@@ -41,7 +42,8 @@
             pkgsCross.riscv64-embedded.buildPackages.gcc
             pkgsCross.riscv64-embedded.buildPackages.gdb
             python3
-            qemu-cheri
+            qemu
+            # qemu-cheri
             clang-tools
             just
             pkgs.unixtools.xxd
